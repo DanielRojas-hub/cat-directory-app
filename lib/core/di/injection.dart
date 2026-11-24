@@ -2,6 +2,10 @@ import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/breeds/data/datasources/breeds_local_datasource.dart';
+import '../../features/breeds/data/datasources/breeds_remote_datasource.dart';
+import '../../features/breeds/data/repositories/breeds_repository_impl.dart';
+import '../../features/breeds/domain/repositories/breeds_repository.dart';
 import '../network/connectivity_monitor.dart';
 import '../network/dio_client.dart';
 import '../storage/cache_envelope.dart';
@@ -24,6 +28,18 @@ Future<void> configureDependencies() async {
     ..registerLazySingleton<Dio>(
       () => DioClientFactory.create(
         connectivityMonitor: sl<ConnectivityMonitor>(),
+      ),
+    )
+    ..registerLazySingleton<BreedsRemoteDataSource>(
+      () => BreedsRemoteDataSourceImpl(sl<Dio>()),
+    )
+    ..registerLazySingleton<BreedsLocalDataSource>(
+      () => BreedsLocalDataSourceImpl(sl<CacheStore>()),
+    )
+    ..registerLazySingleton<BreedsRepository>(
+      () => BreedsRepositoryImpl(
+        remoteDataSource: sl<BreedsRemoteDataSource>(),
+        localDataSource: sl<BreedsLocalDataSource>(),
       ),
     );
 }
