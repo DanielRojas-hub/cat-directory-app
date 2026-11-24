@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "TEAM_ID.com.nextep.catdirectory.catDirectoryApp"
+        ],
+        "components": [
+          {
+            "/": "/breed/*",
+            "comment": "Matches parameterized cat breed detail deep links"
+          }
+        ]
+      }
+    ]
+  }
+}
