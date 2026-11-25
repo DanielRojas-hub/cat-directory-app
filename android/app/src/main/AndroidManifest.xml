@@ -43,7 +43,7 @@
                 <data
                     android:scheme="https"
                     android:host="cat-directory.nextep.dev"
-                    android:pathPrefix="/breed" />
+                    android:pathPrefix="/breed/" />
             </intent-filter>
 
             <!-- Custom scheme fallback for local testing: catdirectory://breed/Abyssinian -->

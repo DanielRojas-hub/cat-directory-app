@@ -124,5 +124,94 @@ void main() {
         throwsA(isA<NotFoundFailure>()),
       );
     });
+
+    test('findBreedByName stops at maxLookupPages when API returns anomalous lastPage',
+        () async {
+      when(
+        () => remoteDataSource.fetchBreedsPage(
+          page: any(named: 'page'),
+          limit: 50,
+        ),
+      ).thenAnswer(
+        (invocation) async => BreedsPageModel(
+          currentPage: invocation.namedArguments[#page] as int,
+          lastPage: 9999,
+          total: 500000,
+          data: page1Model.data,
+        ),
+      );
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+        maxLookupPages: 3,
+      );
+
+      await expectLater(
+        () => repository.findBreedByName('MissingBreed'),
+        throwsA(isA<NotFoundFailure>()),
+      );
+
+      verify(
+        () => remoteDataSource.fetchBreedsPage(
+          page: any(named: 'page'),
+          limit: 50,
+        ),
+      ).called(3);
+    });
+
+    test('findBreedByName enforces defaultMaxLookupPages safety bound',
+        () async {
+      when(
+        () => remoteDataSource.fetchBreedsPage(
+          page: any(named: 'page'),
+          limit: 50,
+        ),
+      ).thenAnswer(
+        (invocation) async => BreedsPageModel(
+          currentPage: invocation.namedArguments[#page] as int,
+          lastPage: 10000,
+          total: 500000,
+          data: const [],
+        ),
+      );
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+      );
+
+      await expectLater(
+        () => repository.findBreedByName('MissingBreed'),
+        throwsA(isA<NotFoundFailure>()),
+      );
+
+      verify(
+        () => remoteDataSource.fetchBreedsPage(
+          page: any(named: 'page'),
+          limit: 50,
+        ),
+      ).called(BreedsRepositoryImpl.defaultMaxLookupPages);
+    });
+
+    test('findBreedByName throws NotFoundFailure immediately for blank names',
+        () async {
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+      );
+
+      await expectLater(
+        () => repository.findBreedByName('   '),
+        throwsA(isA<NotFoundFailure>()),
+      );
+
+      verifyNever(
+        () => remoteDataSource.fetchBreedsPage(
+          page: any(named: 'page'),
+          limit: any(named: 'limit'),
+        ),
+      );
+    });
   });
 }

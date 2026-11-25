@@ -68,6 +68,14 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
           breedErrorMessage: failure.message,
         ),
       );
+    } on Object {
+      if (isClosed) return;
+      emit(
+        state.copyWith(
+          breedStatus: BreedDetailStatus.failure,
+          breedErrorMessage: const UnknownFailure().message,
+        ),
+      );
     }
   }
 
@@ -100,6 +108,14 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
         state.copyWith(
           factStatus: CatFactStatus.failure,
           factErrorMessage: failure.message,
+        ),
+      );
+    } on Object {
+      if (isClosed) return;
+      emit(
+        state.copyWith(
+          factStatus: CatFactStatus.failure,
+          factErrorMessage: const UnknownFailure().message,
         ),
       );
     }

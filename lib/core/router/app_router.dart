@@ -49,11 +49,11 @@ GoRouter createAppRouter({
         path: AppRoutes.breedDetail,
         name: 'breedDetail',
         builder: (context, state) {
-          final rawName = state.pathParameters['name'] ?? '';
-          final breedName = Uri.decodeComponent(rawName);
+          final breedName = state.pathParameters['name'] ?? '';
           final extraBreed = state.extra is Breed ? state.extra! as Breed : null;
 
           return BlocProvider<BreedDetailCubit>(
+            key: ValueKey(breedName),
             create: (_) => createDetailCubit()
               ..load(
                 breedName: breedName,
