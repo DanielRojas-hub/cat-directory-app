@@ -11,6 +11,8 @@ import 'package:cat_directory_app/features/breeds/domain/repositories/breeds_rep
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail_cubit.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_bloc.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_state.dart';
+import 'package:cat_directory_app/features/breeds/presentation/pages/breed_detail_page.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mocktail/mocktail.dart';
@@ -19,6 +21,30 @@ class _MockBreedsRepository extends Mock implements BreedsRepository {}
 
 class _MockConnectivityMonitor extends Mock implements ConnectivityMonitor {}
 
+SemanticsOwner _semanticsOwner(WidgetTester tester) {
+  return tester
+      .renderObject(find.byType(CatDirectoryApp))
+      .owner!
+      .semanticsOwner!;
+}
+
+List<SemanticsNode> _collectSemanticsNodes(WidgetTester tester) {
+  final root = _semanticsOwner(tester).rootSemanticsNode;
+  final nodes = <SemanticsNode>[];
+  if (root == null) return nodes;
+
+  void visit(SemanticsNode node) {
+    nodes.add(node);
+    node.visitChildren((child) {
+      visit(child);
+      return true;
+    });
+  }
+
+  visit(root);
+  return nodes;
+}
+
 void main() {
   const sampleBreed = Breed(
     breed: 'Abyssinian',
@@ -26,6 +52,14 @@ void main() {
     origin: 'Natural/Standard',
     coat: 'Short',
     pattern: 'Ticked',
+  );
+
+  const secondBreed = Breed(
+    breed: 'Bengal',
+    country: 'United States',
+    origin: 'Hybrid',
+    coat: 'Short',
+    pattern: 'Spotted',
   );
 
   group('Accessibility Semantics audit', () {
@@ -96,9 +130,217 @@ void main() {
         findsOneWidget,
       );
 
+      final textFieldNodes = _collectSemanticsNodes(tester)
+          .where((node) => node.getSemanticsData().flagsCollection.isTextField)
+          .toList();
+      expect(textFieldNodes, hasLength(1));
+
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      handle.dispose();
+    });
+
+    testWidgets(
+        'Search field exposes single textField node and independent clear button via SemanticsAction.tap',
+        (tester) async {
+      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
+          .thenAnswer(
+        (_) async => const BreedsPage(
+          currentPage: 1,
+          lastPage: 1,
+          total: 2,
+          items: [sampleBreed, secondBreed],
+        ),
+      );
+
+      final handle = tester.ensureSemantics();
+      final router = createAppRouter(
+        detailCubitFactory: () => BreedDetailCubit(repository: repository),
+      );
+      addTearDown(router.dispose);
+
+      final reachedLoaded = bloc.stream.firstWhere(
+        (s) => s.status == BreedsStatus.loaded,
+      );
+
+      await tester.pumpWidget(CatDirectoryApp(breedsBloc: bloc, router: router));
+      await tester.runAsync(() => reachedLoaded);
+      await tester.pumpAndSettle();
+
+      final reachedFiltered = bloc.stream.firstWhere(
+        (s) => s.searchQuery == 'Aby',
+      );
+      await tester.enterText(find.byType(TextField), 'Aby');
+      await tester.runAsync(() => reachedFiltered);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.bySemanticsLabel(
+          RegExp('Raza Abyssinian, país de origen Ethiopia'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp('Raza Bengal, país de origen United States'),
+        ),
+        findsNothing,
+      );
+
+      // Ensure no duplicate textField node wraps EditableText or suffixIcon.
+      final textFieldNodes = _collectSemanticsNodes(tester)
+          .where((node) => node.getSemanticsData().flagsCollection.isTextField)
+          .toList();
+      expect(textFieldNodes, hasLength(1));
+
+      final clearTooltipFinder = find.byTooltip('Limpiar búsqueda');
+      expect(clearTooltipFinder, findsOneWidget);
+
+      final clearNode = tester.semantics.find(clearTooltipFinder);
+      final clearData = clearNode.getSemanticsData();
+      expect(clearNode.id, isNot(textFieldNodes.single.id));
+      expect(clearData.flagsCollection.isButton, isTrue);
+      expect(clearData.flagsCollection.isTextField, isFalse);
+      expect(clearData.hasAction(SemanticsAction.tap), isTrue);
+
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+
+      final reachedCleared = bloc.stream.firstWhere(
+        (s) => s.searchQuery.isEmpty,
+      );
+      _semanticsOwner(tester).performAction(
+        clearNode.id,
+        SemanticsAction.tap,
+      );
+      await tester.runAsync(() => reachedCleared);
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Limpiar búsqueda'), findsNothing);
+      expect(
+        find.bySemanticsLabel(
+          RegExp('Raza Bengal, país de origen United States'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      handle.dispose();
+    });
+
+    testWidgets(
+        'BreedCard exposes SemanticsAction.tap and navigates to BreedDetailPage',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      final router = createAppRouter(
+        detailCubitFactory: () => BreedDetailCubit(repository: repository),
+      );
+      addTearDown(router.dispose);
+
+      final reachedLoaded = bloc.stream.firstWhere(
+        (s) => s.status == BreedsStatus.loaded,
+      );
+
+      await tester.pumpWidget(CatDirectoryApp(breedsBloc: bloc, router: router));
+      await tester.runAsync(() => reachedLoaded);
+      await tester.pumpAndSettle();
+
+      final breedCardFinder = find.semantics.byLabel(
+        RegExp('Raza Abyssinian, país de origen Ethiopia'),
+      );
+      expect(breedCardFinder, findsOneWidget);
+
+      final cardData = breedCardFinder.evaluate().single.getSemanticsData();
+      expect(cardData.flagsCollection.isButton, isTrue);
+      expect(cardData.hasAction(SemanticsAction.tap), isTrue);
+
+      tester.semantics.tap(breedCardFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BreedDetailPage), findsOneWidget);
+      expect(find.text('Ficha de la Raza'), findsOneWidget);
+      expect(find.text('Dato Curioso Aleatorio'), findsOneWidget);
+      expect(find.text('“Cats have 32 muscles in each ear.”'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      handle.dispose();
+    });
+
+    testWidgets(
+        'BreedDetailPage satisfies accessibility guidelines and CatFactCard refresh has single button node',
+        (tester) async {
+      var factCallCount = 0;
+      when(() => repository.fetchRandomFact()).thenAnswer((_) async {
+        factCallCount++;
+        if (factCallCount == 1) {
+          return const CatFact(
+            fact: 'Cats have 32 muscles in each ear.',
+            length: 33,
+          );
+        }
+        return const CatFact(
+          fact: 'Cats can rotate their ears 180 degrees.',
+          length: 39,
+        );
+      });
+
+      final handle = tester.ensureSemantics();
+      final router = createAppRouter(
+        initialLocation: AppRoutes.breedDetailPath('Abyssinian'),
+        detailCubitFactory: () => BreedDetailCubit(repository: repository),
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(CatDirectoryApp(breedsBloc: bloc, router: router));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BreedDetailPage), findsOneWidget);
+      expect(find.text('“Cats have 32 muscles in each ear.”'), findsOneWidget);
+
+      // Verify single semantic button node for CatFactCard reload (no duplicate wrapper).
+      final refreshNodes = _collectSemanticsNodes(tester).where((node) {
+        final data = node.getSemanticsData();
+        return data.tooltip.contains('Cargar otro dato curioso') ||
+            data.label.contains('Cargar otro dato curioso');
+      }).toList();
+      expect(refreshNodes, hasLength(1));
+
+      final refreshNode = refreshNodes.single;
+      final refreshData = refreshNode.getSemanticsData();
+      expect(refreshData.flagsCollection.isButton, isTrue);
+      expect(refreshData.hasAction(SemanticsAction.tap), isTrue);
+      expect(
+        refreshNode.parent?.getSemanticsData().flagsCollection.isButton,
+        isNot(true),
+      );
+
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+
+      final refreshButtonFinder = find.byTooltip(
+        'Cargar otro dato curioso aleatorio',
+      );
+      expect(refreshButtonFinder, findsOneWidget);
+
+      _semanticsOwner(tester).performAction(
+        refreshNode.id,
+        SemanticsAction.tap,
+      );
+      await tester.pumpAndSettle();
+
+      expect(factCallCount, 2);
+      expect(
+        find.text('“Cats can rotate their ears 180 degrees.”'),
+        findsOneWidget,
+      );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();

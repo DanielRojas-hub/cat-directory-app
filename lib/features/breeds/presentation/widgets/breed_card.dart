@@ -22,6 +22,7 @@ class BreedCard extends StatelessWidget {
     return RepaintBoundary(
       child: Semantics(
         button: true,
+        onTap: onTap,
         label: 'Raza ${breed.breed}, país de origen ${breed.displayCountry}',
         hint: 'Toca dos veces para ver detalles y un dato curioso',
         excludeSemantics: true,

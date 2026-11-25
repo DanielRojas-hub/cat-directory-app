@@ -177,34 +177,30 @@ class _BreedsListPageState extends State<BreedsListPage> {
               child: ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _searchController,
                 builder: (context, value, _) {
-                  return Semantics(
-                    label: 'Buscar raza de gato',
-                    hint: 'Filtra por nombre entre las razas cargadas',
-                    textField: true,
-                    child: TextField(
-                      controller: _searchController,
-                      textInputAction: TextInputAction.search,
-                      onChanged: (query) => context
-                          .read<BreedsBloc>()
-                          .add(BreedsSearchQueryChanged(query)),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar raza (ej. Abyssinian)...',
-                        prefixIcon: const ExcludeSemantics(
-                          child: Icon(Icons.search_rounded),
-                        ),
-                        suffixIcon: value.text.isNotEmpty
-                            ? IconButton(
-                                tooltip: 'Limpiar búsqueda',
-                                onPressed: () {
-                                  _searchController.clear();
-                                  context
-                                      .read<BreedsBloc>()
-                                      .add(const BreedsSearchQueryChanged(''));
-                                },
-                                icon: const Icon(Icons.close_rounded),
-                              )
-                            : null,
+                  return TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    onChanged: (query) => context
+                        .read<BreedsBloc>()
+                        .add(BreedsSearchQueryChanged(query)),
+                    decoration: InputDecoration(
+                      labelText: 'Buscar raza de gato',
+                      hintText: 'Buscar raza (ej. Abyssinian)...',
+                      prefixIcon: const ExcludeSemantics(
+                        child: Icon(Icons.search_rounded),
                       ),
+                      suffixIcon: value.text.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Limpiar búsqueda',
+                              onPressed: () {
+                                _searchController.clear();
+                                context
+                                    .read<BreedsBloc>()
+                                    .add(const BreedsSearchQueryChanged(''));
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                            )
+                          : null,
                     ),
                   );
                 },
