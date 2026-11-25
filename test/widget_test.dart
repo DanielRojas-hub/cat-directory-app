@@ -65,8 +65,12 @@ void main() {
       (_) => const Stream<bool>.empty(),
     );
     when(() => repository.getCachedFirstPage()).thenReturn(null);
-    when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-        .thenAnswer(
+    when(
+      () => repository.fetchBreedsPage(
+        page: any(named: 'page'),
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer(
       (_) async => const BreedsPage(
         currentPage: 1,
         lastPage: 1,
@@ -74,17 +78,39 @@ void main() {
         items: [abyssinian],
       ),
     );
-    when(() => repository.findBreedByName('Abyssinian'))
-        .thenAnswer((_) async => abyssinian);
-    when(() => repository.findBreedByName('Bengal'))
-        .thenAnswer((_) async => bengal);
-    when(() => repository.findBreedByName('British Shorthair'))
-        .thenAnswer((_) async => britishShorthair);
-    when(() => repository.findBreedByName('Bengal 100%'))
-        .thenAnswer((_) async => bengalPercent);
-    when(() => repository.findBreedByName('Cat%20Test'))
-        .thenAnswer((_) async => literalEncodedBreed);
-    when(() => repository.fetchRandomFact()).thenAnswer(
+    when(
+      () => repository.findBreedByName(
+        'Abyssinian',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => abyssinian);
+    when(
+      () => repository.findBreedByName(
+        'Bengal',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => bengal);
+    when(
+      () => repository.findBreedByName(
+        'British Shorthair',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => britishShorthair);
+    when(
+      () => repository.findBreedByName(
+        'Bengal 100%',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => bengalPercent);
+    when(
+      () => repository.findBreedByName(
+        'Cat%20Test',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => literalEncodedBreed);
+    when(
+      () => repository.fetchRandomFact(cancelToken: any(named: 'cancelToken')),
+    ).thenAnswer(
       (_) async => const CatFact(fact: 'Cats sleep 12-16 hours a day.', length: 30),
     );
 
@@ -147,8 +173,18 @@ void main() {
     expect(find.text('Abyssinian'), findsNothing);
     expect(find.text('Ethiopia'), findsNothing);
 
-    verify(() => repository.findBreedByName('Abyssinian')).called(1);
-    verify(() => repository.findBreedByName('Bengal')).called(1);
+    verify(
+      () => repository.findBreedByName(
+        'Abyssinian',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).called(1);
+    verify(
+      () => repository.findBreedByName(
+        'Bengal',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).called(1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -170,7 +206,12 @@ void main() {
 
     expect(find.text('British Shorthair'), findsAtLeastNWidgets(1));
     expect(find.text('United Kingdom'), findsAtLeastNWidgets(1));
-    verify(() => repository.findBreedByName('British Shorthair')).called(1);
+    verify(
+      () => repository.findBreedByName(
+        'British Shorthair',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).called(1);
 
     // Percent sign in breed name must not trigger ArgumentError via double decode.
     router.go(AppRoutes.breedDetailPath('Bengal 100%'));
@@ -178,7 +219,12 @@ void main() {
 
     expect(find.text('Bengal 100%'), findsAtLeastNWidgets(1));
     expect(find.text('Marbled'), findsOneWidget);
-    verify(() => repository.findBreedByName('Bengal 100%')).called(1);
+    verify(
+      () => repository.findBreedByName(
+        'Bengal 100%',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).called(1);
 
     // Literal '%20' must be decoded once to 'Cat%20Test', not 'Cat Test'.
     router.go(AppRoutes.breedDetailPath('Cat%20Test'));
@@ -186,7 +232,12 @@ void main() {
 
     expect(find.text('Cat%20Test'), findsAtLeastNWidgets(1));
     expect(find.text('Spain'), findsAtLeastNWidgets(1));
-    verify(() => repository.findBreedByName('Cat%20Test')).called(1);
+    verify(
+      () => repository.findBreedByName(
+        'Cat%20Test',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).called(1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -224,7 +275,12 @@ void main() {
       'Cold-start detail screen retries breed lookup when tapping Reintentar',
       (tester) async {
     var attempts = 0;
-    when(() => repository.findBreedByName('Bengal')).thenAnswer((_) async {
+    when(
+      () => repository.findBreedByName(
+        'Bengal',
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async {
       attempts++;
       if (attempts == 1) {
         throw const NetworkFailure();

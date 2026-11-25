@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cat_directory_app/core/network/connectivity_monitor.dart';
+import 'package:cat_directory_app/core/network/dio_client.dart';
 import 'package:cat_directory_app/core/network/exponential_backoff_interceptor.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -281,6 +283,227 @@ void main() {
       );
       expect(clientErrorAdapter.callCount, 1);
       expect(clientErrorDelays, isEmpty);
+    });
+
+    test('honors Retry-After header in seconds and HTTP-date on 429 responses',
+        () async {
+      var now = DateTime.utc(2026, 11, 25, 12);
+      final recordedDelays = <Duration>[];
+      final adapter = _ScriptedHttpAdapter([
+        (_) async => ResponseBody.fromString(
+              'Too Many Requests',
+              429,
+              headers: {
+                'retry-after': ['2'],
+              },
+            ),
+        (_) async => ResponseBody.fromString(
+              'Too Many Requests',
+              429,
+              headers: {
+                'retry-after': [
+                  HttpDate.format(now.add(const Duration(seconds: 3))),
+                ],
+              },
+            ),
+        (_) async => ResponseBody.fromString(
+              jsonEncode({'fact': 'Respected Retry-After', 'length': 21}),
+              200,
+              headers: {
+                Headers.contentTypeHeader: [Headers.jsonContentType],
+              },
+            ),
+      ]);
+
+      final dio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = adapter;
+
+      dio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: dio,
+          connectivityMonitor: connectivity,
+          maxRetries: 3,
+          baseDelay: const Duration(milliseconds: 500),
+          maxJitter: Duration.zero,
+          totalDeadline: const Duration(seconds: 16),
+          clock: () => now,
+          delayFn: (delay) async {
+            recordedDelays.add(delay);
+            now = now.add(delay);
+          },
+        ),
+      );
+
+      final response = await dio.get<Map<String, dynamic>>('/fact');
+      expect(response.statusCode, 200);
+      expect(response.data?['fact'], 'Respected Retry-After');
+      expect(adapter.callCount, 3);
+      expect(recordedDelays, [
+        const Duration(seconds: 2),
+        const Duration(seconds: 3),
+      ]);
+    });
+
+    test('aborts retries when totalDeadline (16s) or Retry-After exceeds remaining budget',
+        () async {
+      var now = DateTime.utc(2026, 11, 25, 12);
+      final recordedDelays = <Duration>[];
+      final observedTimeouts = <Duration?>[];
+
+      final adapter = _ScriptedHttpAdapter([
+        (options) async {
+          observedTimeouts.add(options.receiveTimeout);
+          now = now.add(const Duration(seconds: 7));
+          return ResponseBody.fromString('Service Unavailable', 503);
+        },
+        (options) async {
+          observedTimeouts.add(options.receiveTimeout);
+          now = now.add(const Duration(seconds: 7));
+          return ResponseBody.fromString('Service Unavailable', 503);
+        },
+        (options) async {
+          observedTimeouts.add(options.receiveTimeout);
+          return ResponseBody.fromString('Service Unavailable', 503);
+        },
+      ]);
+
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: 'https://catfact.ninja',
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 8),
+        ),
+      )..httpClientAdapter = adapter;
+
+      dio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: dio,
+          connectivityMonitor: connectivity,
+          maxRetries: 3,
+          baseDelay: const Duration(seconds: 1),
+          maxJitter: Duration.zero,
+          totalDeadline: const Duration(seconds: 16),
+          clock: () => now,
+          delayFn: (delay) async {
+            recordedDelays.add(delay);
+            now = now.add(delay);
+          },
+        ),
+      );
+
+      await expectLater(
+        () => dio.get<Map<String, dynamic>>('/breeds'),
+        throwsA(isA<DioException>()),
+      );
+
+      // Attempt 0 took 7s -> sleeps 1s (8s elapsed, remaining 8s) -> Attempt 1 takes 7s
+      // (15s elapsed, remaining 1s) -> next backoff is 2s >= 1s remaining -> stops!
+      expect(adapter.callCount, 2);
+      expect(recordedDelays, [const Duration(seconds: 1)]);
+      expect(observedTimeouts, [
+        const Duration(seconds: 8),
+        const Duration(seconds: 8),
+      ]);
+
+      // Retry-After exceeding remaining deadline aborts immediately with 0 sleep.
+      var nowRateLimit = DateTime.utc(2026, 11, 25, 13);
+      final rateLimitDelays = <Duration>[];
+      final rateLimitAdapter = _ScriptedHttpAdapter([
+        (_) async => ResponseBody.fromString(
+              'Too Many Requests',
+              429,
+              headers: {
+                'retry-after': ['30'],
+              },
+            ),
+      ]);
+      final rateLimitDio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = rateLimitAdapter;
+      rateLimitDio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: rateLimitDio,
+          connectivityMonitor: connectivity,
+          totalDeadline: const Duration(seconds: 16),
+          clock: () => nowRateLimit,
+          delayFn: (delay) async {
+            rateLimitDelays.add(delay);
+            nowRateLimit = nowRateLimit.add(delay);
+          },
+        ),
+      );
+
+      await expectLater(
+        () => rateLimitDio.get<Map<String, dynamic>>('/fact'),
+        throwsA(
+          isA<DioException>().having(
+            (e) => e.response?.statusCode,
+            'statusCode',
+            429,
+          ),
+        ),
+      );
+      expect(rateLimitAdapter.callCount, 1);
+      expect(rateLimitDelays, isEmpty);
+    });
+
+    test('aborts backoff delay immediately when CancelToken is cancelled',
+        () async {
+      final delayGate = Completer<void>();
+      final delayStarted = Completer<void>();
+      final adapter = _ScriptedHttpAdapter([
+        (_) async => ResponseBody.fromString('Service Unavailable', 503),
+        (_) async => ResponseBody.fromString('{}', 200),
+      ]);
+
+      final dio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = adapter;
+
+      dio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: dio,
+          connectivityMonitor: connectivity,
+          maxRetries: 3,
+          baseDelay: const Duration(seconds: 5),
+          maxJitter: Duration.zero,
+          delayFn: (_) {
+            if (!delayStarted.isCompleted) delayStarted.complete();
+            return delayGate.future;
+          },
+        ),
+      );
+
+      final cancelToken = CancelToken();
+      final requestFuture = dio.get<Map<String, dynamic>>(
+        '/breeds',
+        cancelToken: cancelToken,
+      );
+
+      await delayStarted.future;
+      cancelToken.cancel('User refreshed');
+
+      await expectLater(
+        requestFuture,
+        throwsA(
+          isA<DioException>().having(
+            (e) => e.type,
+            'type',
+            DioExceptionType.cancel,
+          ),
+        ),
+      );
+      expect(adapter.callCount, 1);
+    });
+
+    test('DioClientFactory configures 5s connectTimeout and 16s totalDeadline',
+        () {
+      final dio = DioClientFactory.create(connectivityMonitor: connectivity);
+
+      expect(dio.options.connectTimeout, const Duration(seconds: 5));
+      expect(DioClientFactory.totalDeadline, const Duration(seconds: 16));
+      final backoff = dio.interceptors
+          .whereType<ExponentialBackoffInterceptor>()
+          .single;
+      expect(backoff.totalDeadline, const Duration(seconds: 16));
     });
   });
 }

@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../../../core/errors/app_failure.dart';
 import '../../domain/entities/breed.dart';
 import '../../domain/entities/breeds_page.dart';
@@ -49,28 +51,46 @@ final class BreedsRepositoryImpl implements BreedsRepository {
   Future<BreedsPage> fetchBreedsPage({
     required int page,
     int limit = BreedsRepository.defaultPageSize,
+    CancelToken? cancelToken,
   }) async {
-    final model = await _remoteDataSource.fetchBreedsPage(
-      page: page,
-      limit: limit,
-    );
+    final model = cancelToken != null
+        ? await _remoteDataSource.fetchBreedsPage(
+            page: page,
+            limit: limit,
+            cancelToken: cancelToken,
+          )
+        : await _remoteDataSource.fetchBreedsPage(
+            page: page,
+            limit: limit,
+          );
 
-    if (page == 1) {
-      await _localDataSource.saveFirstPage(model);
+    if (page == 1 && model.data.isNotEmpty) {
+      try {
+        await _localDataSource.saveFirstPage(model);
+      } on Object {
+        // Best-effort local persistence: never fail a valid remote response.
+      }
     }
 
     final entity = model.toEntity();
+    if (page == 1 && model.data.isNotEmpty) {
+      _memoryIndex.clear();
+    }
     _indexBreeds(entity.items);
     return entity;
   }
 
   @override
   Future<void> invalidateCache() {
+    _memoryIndex.clear();
     return _localDataSource.invalidate();
   }
 
   @override
-  Future<Breed> findBreedByName(String name) async {
+  Future<Breed> findBreedByName(
+    String name, {
+    CancelToken? cancelToken,
+  }) async {
     final normalized = _normalizeKey(name);
     if (normalized.isEmpty) {
       throw NotFoundFailure(
@@ -97,10 +117,25 @@ final class BreedsRepositoryImpl implements BreedsRepository {
     const lookupPageSize = 50;
 
     do {
-      final model = await _remoteDataSource.fetchBreedsPage(
-        page: currentPage,
-        limit: lookupPageSize,
-      );
+      if (cancelToken?.isCancelled ?? false) {
+        throw AppFailure.fromDioException(
+          DioException.requestCancelled(
+            requestOptions: RequestOptions(path: '/breeds'),
+            reason: cancelToken?.cancelError?.error,
+          ),
+        );
+      }
+
+      final model = cancelToken != null
+          ? await _remoteDataSource.fetchBreedsPage(
+              page: currentPage,
+              limit: lookupPageSize,
+              cancelToken: cancelToken,
+            )
+          : await _remoteDataSource.fetchBreedsPage(
+              page: currentPage,
+              limit: lookupPageSize,
+            );
       final entity = model.toEntity();
       _indexBreeds(entity.items);
 
@@ -119,8 +154,12 @@ final class BreedsRepositoryImpl implements BreedsRepository {
   }
 
   @override
-  Future<CatFact> fetchRandomFact() async {
-    final model = await _remoteDataSource.fetchRandomFact();
+  Future<CatFact> fetchRandomFact({
+    CancelToken? cancelToken,
+  }) async {
+    final model = cancelToken != null
+        ? await _remoteDataSource.fetchRandomFact(cancelToken: cancelToken)
+        : await _remoteDataSource.fetchRandomFact();
     return model.toEntity();
   }
 

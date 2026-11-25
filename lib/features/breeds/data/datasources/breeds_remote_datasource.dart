@@ -9,9 +9,12 @@ abstract interface class BreedsRemoteDataSource {
   Future<BreedsPageModel> fetchBreedsPage({
     required int page,
     required int limit,
+    CancelToken? cancelToken,
   });
 
-  Future<CatFactModel> fetchRandomFact();
+  Future<CatFactModel> fetchRandomFact({
+    CancelToken? cancelToken,
+  });
 }
 
 final class BreedsRemoteDataSourceImpl implements BreedsRemoteDataSource {
@@ -23,15 +26,25 @@ final class BreedsRemoteDataSourceImpl implements BreedsRemoteDataSource {
   Future<BreedsPageModel> fetchBreedsPage({
     required int page,
     required int limit,
+    CancelToken? cancelToken,
   }) async {
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        '/breeds',
-        queryParameters: {
-          'page': page,
-          'limit': limit,
-        },
-      );
+      final response = cancelToken != null
+          ? await _dio.get<Map<String, dynamic>>(
+              '/breeds',
+              queryParameters: {
+                'page': page,
+                'limit': limit,
+              },
+              cancelToken: cancelToken,
+            )
+          : await _dio.get<Map<String, dynamic>>(
+              '/breeds',
+              queryParameters: {
+                'page': page,
+                'limit': limit,
+              },
+            );
       final data = response.data;
       if (data == null) {
         throw const ServerFailure(
@@ -52,9 +65,16 @@ final class BreedsRemoteDataSourceImpl implements BreedsRemoteDataSource {
   }
 
   @override
-  Future<CatFactModel> fetchRandomFact() async {
+  Future<CatFactModel> fetchRandomFact({
+    CancelToken? cancelToken,
+  }) async {
     try {
-      final response = await _dio.get<Map<String, dynamic>>('/fact');
+      final response = cancelToken != null
+          ? await _dio.get<Map<String, dynamic>>(
+              '/fact',
+              cancelToken: cancelToken,
+            )
+          : await _dio.get<Map<String, dynamic>>('/fact');
       final data = response.data;
       if (data == null) {
         throw const ServerFailure(

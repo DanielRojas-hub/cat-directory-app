@@ -9,7 +9,8 @@ final class BreedsStarted extends BreedsEvent {
   const BreedsStarted();
 }
 
-/// Pull-to-refresh action that reloads page 1 and preserves local cache on failure.
+/// Pull-to-refresh action that reloads page 1, cancels in-flight pagination,
+/// shares completion across concurrent refreshes, and preserves local cache on failure.
 final class BreedsRefreshed extends BreedsEvent {
   const BreedsRefreshed({this.completer});
 

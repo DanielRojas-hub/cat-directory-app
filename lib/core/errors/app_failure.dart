@@ -12,6 +12,11 @@ sealed class AppFailure implements Exception {
   final bool isRetryable;
   final Object? cause;
 
+  /// Returns `true` when this failure resulted from an explicit request cancellation.
+  bool get isCancellation =>
+      cause is DioException &&
+      (cause! as DioException).type == DioExceptionType.cancel;
+
   /// Maps a [DioException] into a user-friendly, typed [AppFailure].
   factory AppFailure.fromDioException(DioException exception) {
     switch (exception.type) {

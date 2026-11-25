@@ -20,9 +20,6 @@ abstract class Breed with _$Breed {
   String get displayCoat => _fallback(coat, 'No especificado');
   String get displayPattern => _fallback(pattern, 'No especificado');
 
-  /// URL-safe slug used in `/breed/:name` parameterized routes.
-  String get routeSlug => Uri.encodeComponent(breed);
-
   static final RegExp _nonWordChars = RegExp(
     r'[^\p{L}\p{M}\p{N}\s]+',
     unicode: true,
