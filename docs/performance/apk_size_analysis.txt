@@ -1,9 +1,9 @@
-Universal Release APK:
+Universal Release APK (v1.1.0+2):
 Command:
 flutter build apk --release
 
 Output summary:
-Built build/app/outputs/flutter-apk/app-release.apk (51.7MB)
+Built build/app/outputs/flutter-apk/app-release.apk (52.8MB)
 Included ABIs:
 - lib/arm64-v8a/libflutter.so
 - lib/armeabi-v7a/libflutter.so
@@ -20,7 +20,7 @@ Tree-shaking:
 - Font asset "MaterialIcons-Regular.otf": 1,645,184 B -> 5,380 B (99.7% reduction)
 
 Output summary:
-Built build/app/outputs/flutter-apk/app-release.apk (18.4MB)
+Built build/app/outputs/flutter-apk/app-release.apk (18.8MB)
 
 app-release.apk (total compressed)                                         18 MB
 --------------------------------------------------------------------------------
@@ -30,31 +30,31 @@ app-release.apk (total compressed)                                         18 MB
     flutter_assets                                                        133 KB
   classes.dex                                                             392 KB
   lib/
-    arm64-v8a                                                              16 MB
-    Dart AOT symbols accounted decompressed size                            5 MB
+    arm64-v8a                                                              17 MB
+    Dart AOT symbols accounted decompressed size                            6 MB
       package:flutter                                                       2 MB
-      package:material_ui                                                 631 KB
-      dart:mixin_deduplication                                            290 KB
-      dart:core                                                           283 KB
-      dart:ui                                                             220 KB
+      package:material_ui                                                 710 KB
+      dart:mixin_deduplication                                            293 KB
+      dart:core                                                           285 KB
+      dart:ui                                                             221 KB
       dart:typed_data                                                     206 KB
-      dart:async                                                          121 KB
-      package:cat_directory_app                                           111 KB
-      dart:io                                                             105 KB
-      package:cupertino_ui                                                 90 KB
+      package:cat_directory_app                                           149 KB
+      dart:async                                                          120 KB
+      package:cupertino_ui                                                117 KB
+      dart:io                                                             106 KB
       dart:convert                                                         78 KB
       dart:collection                                                      72 KB
       package:material_color_utilities                                     71 KB
-      package:go_router                                                    70 KB
+      package:go_router                                                    71 KB
       package:jni                                                          52 KB
-      package:dio                                                          46 KB
+      package:dio                                                          52 KB
       package:source_span                                                  42 KB
+      package:flutter_localizations                                        39 KB
       package:characters                                                   37 KB
-      package:path                                                         26 KB
-      dart:isolate                                                         25 KB
+      package:intl                                                         37 KB
     armeabi-v7a                                                            86 KB
     x86_64                                                                122 KB
   kotlin/                                                                  10 KB
   AndroidManifest.xml                                                       2 KB
-  res/                                                                     33 KB
+  res/                                                                    100 KB
   resources.arsc                                                           87 KB

@@ -2,7 +2,7 @@ name: cat_directory_app
 description: "Interactive Cat Breeds Directory MVP built with Flutter for Nextep Innovation."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.14.0

@@ -5,7 +5,7 @@ Directorio interactivo de razas de gatos desarrollado en **Flutter 3.50.1 (Dart 
 Diseñada con enfoque **Offline-First (Stale-While-Revalidate)**, resiliencia ante redes intermitentes, control estricto de concurrencia, accesibilidad verificada y rendimiento sostenido a **60 FPS sin jank**.
 
 > [!IMPORTANT]
-> **Prerrequisitos de SDK (Obligatorio):** este proyecto requiere **Flutter `3.50.1` (`stable`)** y **Dart `3.14.0`** (`environment: sdk: ^3.14.0`), ya que utiliza el paquete modular `material_ui: ^1.11.1` introducido en Flutter 3.50. Verifica tu entorno con `flutter --version` antes de ejecutar `flutter pub get`.
+> **Prerrequisitos de SDK (Obligatorio):** este proyecto requiere **Flutter `3.50.1` (`stable`)** y **Dart `3.14.0`** (`environment: sdk: ^3.14.0`), ya que utiliza el paquete modular `material_ui: ^1.11.1` introducido en Flutter 3.50. El repositorio incluye [`.fvmrc`](.fvmrc) fijado en `3.50.1`; verifica tu entorno con `flutter --version` (o `fvm use`) antes de ejecutar `flutter pub get`.
 
 ---
 
@@ -23,24 +23,24 @@ Diseñada con enfoque **Offline-First (Stale-While-Revalidate)**, resiliencia an
 - **Directorio de razas (`GET /breeds`)**: Listado fluido con `CustomScrollView` + `SliverList.separated` y tarjetas aisladas con `RepaintBoundary` mostrando nombre (`breed`) y país de origen (`country`).
 - **Paginación Infinite Scroll con control de concurrencia**: Carga automática al aproximarse al final de la lista (20 razas por página) protegida con `droppable()` para impedir múltiples requests simultáneos.
 - **Pull to Refresh**: Recarga desde la página 1 con sobrescritura atómica del caché local solo tras respuesta exitosa (preserva intacto el respaldo offline-first si falla la red o no hay conexión, sincronizado con `RefreshIndicator` vía `Completer<void>`).
-- **Búsqueda local con debounce**: Filtrado en memoria por nombre de raza con `debounce(300ms)` al escribir y limpieza instantánea al pulsar `X` (`immediate: true`), sin mutar ni perder la lista cargada, con `keyboardDismissBehavior.onDrag`, sincronía de controlador y botón para cargar más páginas.
-- **Ruteo parametrizado con `GoRouter`**: Pantalla de detalle accesible en `/breed/:name` (con encoding seguro de caracteres/espacios y soporte para resolución en frío cuando `extra` es `null`).
+- **Búsqueda local con debounce y normalización**: Filtrado en memoria por nombre de raza (insensible a mayúsculas y tildes/diacríticos) con `debounce(300ms)` al escribir y limpieza instantánea al pulsar `X` (`immediate: true`), sin mutar ni perder la lista cargada, con `keyboardDismissBehavior.onDrag`, sincronía de controlador y botón para cargar más páginas.
+- **Ruteo parametrizado con `GoRouter`**: Pantalla de detalle accesible en `/breed/:name` (con encoding seguro de caracteres/espacios y soporte para resolución en frío cuando `extra` es `null`, además de protección contra doble toque).
 - **Offline-First (Stale-While-Revalidate) + Caché con TTL explícito**: Persistencia de la página 1 en `SharedPreferences` envuelta en un `CacheEnvelope<T>` con `cachedAt`, **TTL de 10 minutos**, verificación `isExpired()` e invalidación explícita. Al abrir sin conexión, la lista cacheada se renderiza instantáneamente sin pantalla vacía ni error bloqueante.
-- **Vista de Detalle + 2do Endpoint (`GET /fact`)**: Muestra los 5 atributos completos (`Breed`, `Country`, `Origin`, `Coat`, `Pattern`) y un **Dato Curioso Aleatorio** con estado de carga (`FactSkeleton`), manejo de error y botón de recarga totalmente independientes.
+- **Vista de Detalle + 2do Endpoint (`GET /fact`)**: Muestra los 5 atributos completos (`Breed`, `Country`, `Origin`, `Coat`, `Pattern`) y un **Dato Curioso Aleatorio** con estado de carga (`FactSkeleton`), manejo de error y botón de recarga totalmente independientes, respaldado por `CancelToken` para abortar peticiones en vuelo si el usuario abandona la pantalla.
 - **Resiliencia de red y UX ante fallos**:
   - Monitoreo proactivo/reactivo de red (`connectivity_plus`): *fast-fail* offline (evita desperdiciar reintentos esperando timeouts) y **auto-revalidación automática** al recuperar conexión.
-  - **Backoff exponencial con jitter** en `Dio` (`ExponentialBackoffInterceptor`): hasta **3 reintentos** (`500ms`, `1000ms`, `2000ms` + jitter `0–200ms`) para timeouts, errores de conexión, `429` y `5xx`.
+  - **Backoff exponencial con jitter, `Retry-After` y deadline total** en `Dio` (`ExponentialBackoffInterceptor`): hasta **3 reintentos** (`500ms`, `1000ms`, `2000ms` + jitter `0–200ms`) para timeouts, errores de conexión, `429` (respetando la cabecera `Retry-After`) y `5xx`, acotado por un presupuesto máximo total de `16s` y cancelable con `CancelToken`.
   - Si falla una página intermedia del infinite scroll, **las razas ya cargadas se conservan intactas** y se ofrece un botón inline *"Reintentar página"*.
-- **Accesibilidad (`Semantics`)**: Labels semánticos, hints, encabezados (`header: true`), `ExcludeSemantics` en elementos decorativos y `liveRegion: true` en carga/errores/datos curiosos, validados con pruebas automatizadas de guías Android/iOS y revisión del árbol de `Semantics`.
-- **Auditoría de Performance y Tamaño del APK**: Documentada abajo con captura real del `PerformanceOverlay`, traza de Flutter DevTools en **dispositivo físico iOS en modo `--profile` AOT (`596` frames continuos, `0` frames perdidos)**, compilación de APK universal multi-ABI y desglose `flutter build apk --release --analyze-size`.
+- **Accesibilidad (`Semantics`) y localización de UI (`Locale('es')`)**: Labels semánticos, hints, encabezados (`header: true`), `ExcludeSemantics` en elementos decorativos y `liveRegion: true` en carga/errores/datos curiosos, junto con `flutter_localizations` configurado en `Locale('es')` para controles nativos de Material/Cupertino en español, validados con pruebas automatizadas de guías Android/iOS, contraste WCAG (`textContrastGuideline`) y árbol de `Semantics`.
+- **Auditoría de Performance y Tamaño del APK**: Documentada abajo con captura real del `PerformanceOverlay`, `TimelineSummary` generado en **dispositivo físico iOS en modo `--profile` AOT (`596` frames continuos, `0` frames perdidos)** con aserciones automatizadas en `test_driver/perf_driver.dart`, compilación de APK universal multi-ABI y desglose `flutter build apk --release --analyze-size`.
 
 ### Funcionalidades Opcionales (PLUS)
 - **Deep Linking nativo**: Custom scheme `catdirectory://breed/:name` funcional de inmediato en local, más configuración nativa de **Android App Links** (`autoVerify="true"`) e **iOS Universal Links** (`Runner.entitlements`) acompañados de plantillas [`.well-known/assetlinks.json`](.well-known/assetlinks.json) y [`.well-known/apple-app-site-association`](.well-known/apple-app-site-association) listas para desplegar en un dominio productivo HTTPS.
-- **Dark Mode**: Temas Material 3 claro/oscuro responsivos automáticamente a la configuración del sistema (`ThemeMode.system`).
+- **Identidad visual y Dark Mode**: Ícono de launcher minimalista personalizado (`Cat Directory` unificado en Android e iOS) y temas Material 3 claro/oscuro responsivos automáticamente a la configuración del sistema (`ThemeMode.system`).
 - **Animaciones**: Transiciones `Hero` fluidas del monograma entre la tarjeta del directorio y la cabecera del detalle.
 - **Manejo de ciclo de vida Foreground/Background**: `WidgetsBindingObserver` revalida el caché automáticamente cuando la app regresa a primer plano tras superar el TTL o ≥ 5 minutos en segundo plano.
-- **Testing Unitario + Accesibilidad + Regresión UI/QA + Integración**: **95 tests automatizados** (`bloc_test`, `mocktail`, `flutter_test`) cubriendo BLoC/concurrencia/TTL, backoff exponencial (`IOException`/5xx), conectividad, mapeo `AppFailure`, ruteo/deep links, accesibilidad (`SemanticsAction.tap`), stress responsivo (`320px`, Landscape, `textScaler` `1.5x–2.0x`), paginación de 98 razas y temas Light/Dark, más prueba de integración de scroll sostenido (`integration_test/scroll_performance_test.dart`).
-- **APK Release precompilado**: Disponible en la sección de [Releases](https://github.com/DanielRojas-hub/cat-directory-app/releases) del repositorio (APK universal multi-ABI y `arm64-v8a`).
+- **Testing Unitario + Accesibilidad + Regresión UI/QA + Integración**: **125 tests automatizados** (`bloc_test`, `mocktail`, `flutter_test`) cubriendo BLoC/concurrencia/TTL, `CancelToken`, backoff exponencial (`IOException`/`Retry-After`/deadline/5xx), conectividad, mapeo `AppFailure`, ruteo/deep links, búsqueda normalizada, accesibilidad (`SemanticsAction.tap` y `textContrastGuideline`), `Locale('es')`, stress responsivo (`320px`, Landscape, `textScaler` `1.5x–2.0x`), paginación de 98 razas y temas Light/Dark, más prueba de integración de scroll sostenido (`integration_test/scroll_performance_test.dart` + `test_driver/perf_driver.dart`).
+- **APK Release precompilado (`v1.1.0`)**: Disponible en [GitHub Releases (`v1.1.0`)](https://github.com/DanielRojas-hub/cat-directory-app/releases/tag/v1.1.0) (APK universal multi-ABI y variante `arm64-v8a` con hashes SHA-256).
 
 ---
 
@@ -168,7 +168,7 @@ flutter drive \
 
 **Análisis de frames y decisiones que mantienen 0 jank:**
 - En la captura del `PerformanceOverlay` tomada en iPhone físico (con `98/98` razas cargadas y el pie `Fin del directorio · 98 razas exploradas` visible) las gráficas de **UI (`max 5.2 ms/frame, avg 1.4 ms/frame`)** y **Raster (`max 2.8 ms/frame, avg 2.0 ms/frame`)** permanecen totalmente planas muy por debajo de la línea de `16.67 ms`, con `0` barras rojas de jank.
-- En el `TimelineSummary` completo de **596 frames continuos** en modo `--profile` AOT (`--endless-trace-buffer`), **0 frames excedieron el presupuesto de `16.67 ms`** (`worst UI: 8.22 ms`, `p99 UI: 7.53 ms`, `worst Raster: 3.02 ms`, `0.0` transiciones VSync perdidas y `116.9 MB` de memoria promedio).
+- En el `TimelineSummary` completo de **596 frames continuos** en modo `--profile` AOT (`--endless-trace-buffer`), **0 frames excedieron el presupuesto de `16.67 ms`** (`worst UI: 8.22 ms`, `p99 UI: 7.53 ms`, `worst Raster: 3.02 ms`, `0.0` transiciones VSync perdidas y `116.9 MB` de memoria promedio). El driver [`test_driver/perf_driver.dart`](test_driver/perf_driver.dart) valida estas métricas con aserciones automáticas (`frame_count > 200`, `missed_frame_build_budget_count == 0`, `missed_frame_rasterizer_budget_count == 0`) y exporta el resumen JSON (la traza cruda completa `.timeline.json` se regenera localmente al ejecutar `flutter drive`).
 - Factores clave de rendimiento: `SliverList.separated` con lazy rendering, tarjetas aisladas con `RepaintBoundary`, avatares monograma determinísticos sin decodificación de bitmaps de red, `buildWhen` selectivos en `BlocBuilder` y `ShimmerScope` con un único `AnimationController` compartido.
 
 ---
@@ -179,7 +179,7 @@ flutter drive \
 ```bash
 flutter build apk --release
 ```
-- **Resultado verificado:** `build/app/outputs/flutter-apk/app-release.apk` (**`51.7 MB`**) empaquetando simultáneamente `arm64-v8a`, `armeabi-v7a` y `x86_64` para compatibilidad con dispositivos Android 32/64-bit y emuladores `x86_64`.
+- **Resultado verificado (`v1.1.0+2`):** `build/app/outputs/flutter-apk/app-release.apk` (**`52.8 MB`**) empaquetando simultáneamente `arm64-v8a`, `armeabi-v7a` y `x86_64` para compatibilidad con dispositivos Android 32/64-bit y emuladores `x86_64`.
 
 #### Desglose detallado por arquitectura (`--analyze-size`)
 Flutter CLI requiere un único `--target-platform` al ejecutar `--analyze-size`:
@@ -192,28 +192,29 @@ Resumen completo en [`docs/performance/apk_size_analysis.txt`](docs/performance/
 ```text
 Font asset "CupertinoIcons.ttf" was tree-shaken: 257,628 B -> 848 B (99.7% reduction)
 Font asset "MaterialIcons-Regular.otf" was tree-shaken: 1,645,184 B -> 5,380 B (99.7% reduction)
-✓ Built build/app/outputs/flutter-apk/app-release.apk (18.4 MB)
+✓ Built build/app/outputs/flutter-apk/app-release.apk (18.8 MB)
 
 app-release.apk (total compressed)                                         18 MB
-├── lib/arm64-v8a                                                          16 MB
-│   └── Dart AOT symbols (decompressed: 5 MB)
+├── lib/arm64-v8a                                                          17 MB
+│   └── Dart AOT symbols (decompressed: 6 MB)
 │       ├── package:flutter                                                 2 MB
-│       ├── package:material_ui                                           631 KB
+│       ├── package:material_ui                                           710 KB
 │       ├── dart:core / ui / typed_data / async / io / convert           ~1.1 MB
-│       ├── package:cat_directory_app (código propio)                     111 KB
-│       ├── package:go_router                                              70 KB
-│       └── package:dio                                                    46 KB
+│       ├── package:cat_directory_app (código propio)                     149 KB
+│       ├── package:go_router                                              71 KB
+│       ├── package:dio                                                    52 KB
+│       └── package:flutter_localizations + intl                           76 KB
 ├── classes.dex                                                           392 KB
 ├── lib/x86_64 + armeabi-v7a (shims nativos de plugins AndroidX)          208 KB
 ├── assets/flutter_assets                                                 133 KB
-└── res/ + resources.arsc + AndroidManifest.xml + META-INF                133 KB
+└── res/ + resources.arsc + AndroidManifest.xml + META-INF + kotlin       210 KB
 ```
 
 **Explicación del tamaño:**
-- **Base fija del runtime (`16 MB` en `lib/arm64-v8a` / `51.7 MB` en APK universal con 3 ABIs)**: ~87% del APK `arm64-v8a` corresponde al motor de Flutter (Impeller/Skia + Dart VM AOT). El APK universal multiplica esa base nativa al incluir `arm64-v8a`, `armeabi-v7a` y `x86_64`.
-- **Código de la aplicación y dependencias mínimas**: Todo el código propio (`package:cat_directory_app`) ocupa solo **`111 KB`** descomprimido; `go_router` (`70 KB`) y `dio` (`46 KB`) mantienen una huella mínima. Al evitar librerías pesadas de shimmer, imágenes o animaciones Lottie, `flutter_assets` se mantiene en **`133 KB`**.
+- **Base fija del runtime (`17 MB` en `lib/arm64-v8a` / `52.8 MB` en APK universal con 3 ABIs)**: ~90% del APK `arm64-v8a` corresponde al motor de Flutter (Impeller/Skia + Dart VM AOT). El APK universal multiplica esa base nativa al incluir `arm64-v8a`, `armeabi-v7a` y `x86_64`.
+- **Código de la aplicación y dependencias mínimas**: Todo el código propio (`package:cat_directory_app`) ocupa solo **`149 KB`** descomprimido; `go_router` (`71 KB`), `dio` (`52 KB`) y `flutter_localizations` + `intl` (`76 KB`) mantienen una huella mínima. Al evitar librerías pesadas de shimmer, imágenes o animaciones Lottie, `flutter_assets` se mantiene en **`133 KB`**.
 - **Tree-shaking de fuentes**: Flutter redujo en **99.7%** tanto `MaterialIcons-Regular.otf` (`1.65 MB → 5.38 KB`) como `CupertinoIcons.ttf` (`257 KB → 848 B`).
-- **Distribución en producción**: En Google Play mediante Android App Bundle (`.aab`), Play Delivery entrega únicamente el ABI del dispositivo final (~`18.4 MB` para `arm64-v8a`), mientras que en GitHub Releases se ofrece tanto el APK universal (`51.7 MB`) como la variante `arm64-v8a` (`18.4 MB`).
+- **Distribución en producción**: En Google Play mediante Android App Bundle (`.aab`), Play Delivery entrega únicamente el ABI del dispositivo final (~`18.8 MB` para `arm64-v8a`), mientras que en [GitHub Releases (`v1.1.0`)](https://github.com/DanielRojas-hub/cat-directory-app/releases/tag/v1.1.0) se ofrece tanto el APK universal (`52.8 MB`) como la variante `arm64-v8a` (`18.8 MB`).
 
 ---
 
@@ -222,7 +223,7 @@ app-release.apk (total compressed)                                         18 MB
 - **Buscador**: Campo etiquetado semánticamente para describir su propósito de filtrado local por nombre de raza.
 - **Lista de razas**: Cada tarjeta consolida su lectura semántica con nombre de raza, país de origen y sugerencia de acción, excluyendo el monograma decorativo.
 - **Estados dinámicos**: Los skeletons de carga, el banner offline/SWR, el footer de error de paginación y las actualizaciones de `CatFactCard` usan `liveRegion: true` para notificar cambios dinámicos a lectores de pantalla como **TalkBack** y **VoiceOver**.
-- **Validación realizada**: Verificado mediante pruebas automatizadas en [`test/accessibility_test.dart`](test/accessibility_test.dart) cumpliendo `androidTapTargetGuideline`, `iOSTapTargetGuideline` y `labeledTapTargetGuideline` junto con aserciones del árbol de `Semantics` (labels, hints y acciones `SemanticsAction`), complementado con inspección de interfaz/árbol semántico en iOS Simulator y Accessibility Inspector (sin afirmar pruebas con VoiceOver de dispositivo físico sobre iOS Simulator).
+- **Validación realizada**: Verificado mediante pruebas automatizadas en [`test/accessibility_test.dart`](test/accessibility_test.dart) cumpliendo `androidTapTargetGuideline`, `iOSTapTargetGuideline`, `labeledTapTargetGuideline` y `textContrastGuideline` (WCAG AA en Light y Dark Mode) junto con aserciones del árbol de `Semantics` (labels, hints y acciones `SemanticsAction`), complementado con inspección de interfaz/árbol semántico en iOS Simulator y Accessibility Inspector (sin afirmar pruebas con VoiceOver de dispositivo físico sobre iOS Simulator).
 
 ---
 

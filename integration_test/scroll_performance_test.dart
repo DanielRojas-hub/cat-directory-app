@@ -31,14 +31,13 @@ void main() {
     expect(endFooter, findsOneWidget);
 
     // Phase 2: Measure sustained bidirectional scroll across all loaded breeds
-    // at 60 Hz frame cadence so the timeline captures >200 continuous frames.
+    // at 60 Hz frame cadence. Actual frame-count (>200) and zero-jank budgets
+    // are asserted on the generated TimelineSummary in test_driver/perf_driver.dart.
     const frameInterval = Duration(milliseconds: 16);
-    var drivenFrames = 0;
 
     Future<void> pumpBallisticFrames(int count) async {
       for (var i = 0; i < count; i++) {
         await tester.pump(frameInterval);
-        drivenFrames++;
       }
     }
 
@@ -52,7 +51,6 @@ void main() {
             const Duration(milliseconds: 700),
             frequency: 60.0,
           );
-          drivenFrames += 42;
         }
         await tester.fling(scrollable, const Offset(0, 1200), 2400);
         await pumpBallisticFrames(28);
@@ -65,7 +63,6 @@ void main() {
             const Duration(milliseconds: 700),
             frequency: 60.0,
           );
-          drivenFrames += 42;
         }
         await tester.fling(scrollable, const Offset(0, -1200), 2400);
         await pumpBallisticFrames(28);
@@ -76,6 +73,5 @@ void main() {
     }, reportKey: 'scroll_performance');
 
     await binding.takeScreenshot('performance_overlay_scroll');
-    expect(drivenFrames, greaterThan(200));
   });
 }

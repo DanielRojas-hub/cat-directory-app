@@ -21,6 +21,27 @@ Future<void> main() {
         if (rawTrace.existsSync()) {
           await rawTrace.delete();
         }
+
+        // Enforce real TimelineSummary budgets (>200 captured frames, 0 jank).
+        final metrics = summary.summaryJson;
+        final frameCount = (metrics['frame_count'] as num?)?.toInt() ?? 0;
+        final missedBuild =
+            (metrics['missed_frame_build_budget_count'] as num?)?.toInt() ?? -1;
+        final missedRaster =
+            (metrics['missed_frame_rasterizer_budget_count'] as num?)?.toInt() ??
+                -1;
+
+        if (frameCount <= 200) {
+          throw StateError(
+            'Expected >200 captured scroll frames in TimelineSummary, got $frameCount.',
+          );
+        }
+        if (missedBuild != 0 || missedRaster != 0) {
+          throw StateError(
+            'Jank detected in TimelineSummary: '
+            'missedBuild=$missedBuild, missedRaster=$missedRaster.',
+          );
+        }
       }
     },
     onScreenshot: (name, image, [args]) async {
