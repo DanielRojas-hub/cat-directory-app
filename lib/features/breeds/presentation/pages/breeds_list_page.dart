@@ -407,51 +407,47 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
                     return RefreshIndicator(
                       onRefresh: _onRefresh,
-                      child: Semantics(
-                        label:
-                            'Lista de razas de gatos, ${visibleBreeds.length} visibles',
-                        container: true,
-                        child: CustomScrollView(
-                          controller: _scrollController,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          slivers: [
-                            SliverPadding(
-                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                              sliver: SliverList.separated(
-                                itemCount: visibleBreeds.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 10),
-                                itemBuilder: (context, index) {
-                                  final breed = visibleBreeds[index];
-                                  return BreedCard(
-                                    breed: breed,
-                                    onTap: () => unawaited(
-                                      _openBreedDetail(breed),
-                                    ),
-                                  );
-                                },
-                              ),
+                      child: CustomScrollView(
+                        controller: _scrollController,
+                        semanticChildCount: visibleBreeds.length,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        slivers: [
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                            sliver: SliverList.separated(
+                              itemCount: visibleBreeds.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final breed = visibleBreeds[index];
+                                return BreedCard(
+                                  breed: breed,
+                                  onTap: () => unawaited(
+                                    _openBreedDetail(breed),
+                                  ),
+                                );
+                              },
                             ),
-                            SliverToBoxAdapter(
-                              child: PaginationFooter(
-                                isLoadingMore: state.isLoadingMore,
-                                hasMore: state.hasMore,
-                                isSearching: state.isSearching,
-                                loadedCount: state.breeds.length,
-                                totalCount: state.total,
-                                errorMessage: state.paginationErrorMessage,
-                                onRetry: () => context
-                                    .read<BreedsBloc>()
-                                    .add(const BreedsNextPageRequested()),
-                                onLoadMore: () => context
-                                    .read<BreedsBloc>()
-                                    .add(const BreedsNextPageRequested()),
-                              ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: PaginationFooter(
+                              isLoadingMore: state.isLoadingMore,
+                              hasMore: state.hasMore,
+                              isSearching: state.isSearching,
+                              loadedCount: state.breeds.length,
+                              totalCount: state.total,
+                              errorMessage: state.paginationErrorMessage,
+                              onRetry: () => context
+                                  .read<BreedsBloc>()
+                                  .add(const BreedsNextPageRequested()),
+                              onLoadMore: () => context
+                                  .read<BreedsBloc>()
+                                  .add(const BreedsNextPageRequested()),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     );
                   },

@@ -459,6 +459,77 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets(
+        'Breeds list exposes an unobstructed scrollable SemanticsNode for VoiceOver/TalkBack scrolling',
+        (tester) async {
+      final twentyBreeds = List.generate(
+        20,
+        (i) => Breed(
+          breed: 'Breed $i',
+          country: 'Country $i',
+          origin: 'Natural',
+          coat: 'Short',
+          pattern: 'Solid',
+        ),
+      );
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer(
+        (_) async => BreedsPage(
+          currentPage: 1,
+          lastPage: 2,
+          total: 40,
+          items: twentyBreeds,
+        ),
+      );
+
+      final handle = tester.ensureSemantics();
+      final router = createAppRouter(
+        detailCubitFactory: () => BreedDetailCubit(repository: repository),
+      );
+      addTearDown(router.dispose);
+
+      final reachedLoaded = bloc.stream.firstWhere(
+        (s) => s.status == BreedsStatus.loaded,
+      );
+
+      await tester.pumpWidget(CatDirectoryApp(breedsBloc: bloc, router: router));
+      await tester.runAsync(() => reachedLoaded);
+      await tester.pumpAndSettle();
+
+      final scrollableNodes = _collectSemanticsNodes(tester).where((node) {
+        final data = node.getSemanticsData();
+        return data.flagsCollection.hasImplicitScrolling &&
+            data.hasAction(SemanticsAction.scrollUp);
+      }).toList();
+      expect(scrollableNodes, hasLength(1));
+
+      final scrollableNode = scrollableNodes.single;
+      final initialData = scrollableNode.getSemanticsData();
+      expect(initialData.scrollChildCount, 20);
+      expect(initialData.label, isEmpty);
+      expect(scrollableNode.parent?.getSemanticsData().label ?? '', isEmpty);
+
+      final beforePosition = initialData.scrollPosition;
+      expect(beforePosition, isNotNull);
+      _semanticsOwner(tester).performAction(
+        scrollableNode.id,
+        SemanticsAction.scrollUp,
+      );
+      await tester.pumpAndSettle();
+
+      final afterPosition = scrollableNode.getSemanticsData().scrollPosition;
+      expect(afterPosition, isNotNull);
+      expect(afterPosition!, greaterThan(beforePosition!));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      handle.dispose();
+    });
+
     for (final brightness in const [Brightness.light, Brightness.dark]) {
       final modeLabel = brightness == Brightness.light ? 'Light' : 'Dark';
 
