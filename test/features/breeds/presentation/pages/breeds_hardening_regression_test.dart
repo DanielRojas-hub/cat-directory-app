@@ -11,6 +11,7 @@ import 'package:cat_directory_app/features/breeds/domain/entities/cat_fact.dart'
 import 'package:cat_directory_app/features/breeds/domain/repositories/breeds_repository.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail_cubit.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_bloc.dart';
+import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_event.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_state.dart';
 import 'package:cat_directory_app/features/breeds/presentation/pages/breed_detail_page.dart';
 import 'package:cat_directory_app/features/breeds/presentation/pages/breeds_list_page.dart';
@@ -342,9 +343,22 @@ void main() {
 
         expectNoSavedDataCopy();
 
-        // Tap "Reintentar" inside ConnectivityStatusBanner (triggers BreedsRefreshed).
-        final noticeReceived = bloc.stream.firstWhere((s) => s.notice != null);
+        // Tap "Reintentar" inside ConnectivityStatusBanner (dispatches BreedsStarted when empty).
         await tester.tap(find.text('Reintentar').first);
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+
+        expect(bloc.state.status, BreedsStatus.failure);
+        expect(bloc.state.isOnline, isFalse);
+        expect(find.text(const NetworkFailure().message), findsAtLeastNWidgets(1));
+        expectNoSavedDataCopy();
+
+        // Explicit BreedsRefreshed while offline with empty list also avoids "datos guardados".
+        final noticeReceived = bloc.stream.firstWhere((s) => s.notice != null);
+        bloc.add(const BreedsRefreshed());
         await tester.runAsync(() => noticeReceived);
         await tester.pump();
 

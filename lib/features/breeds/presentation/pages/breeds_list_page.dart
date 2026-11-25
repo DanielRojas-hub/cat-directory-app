@@ -67,7 +67,7 @@ class _BreedsListPageState extends State<BreedsListPage> {
       _postFrameScrollCheckScheduled = false;
       if (!mounted) return;
       final state = context.read<BreedsBloc>().state;
-      if (!state.isOnline || state.isRevalidating) return;
+      if (!state.isOnline || state.isRevalidating || state.isFromCache) return;
       if (onlyWhenUnscrollable &&
           _scrollController.hasClients &&
           _scrollController.position.maxScrollExtent > 0) {

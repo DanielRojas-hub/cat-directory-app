@@ -58,6 +58,7 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
   int _noticeCounter = 0;
   int _requestEpoch = 0;
   bool _isRefreshing = false;
+  bool _isStartupConnectivityPending = false;
   bool _lastStartFailureRetryable = true;
   bool _lastPaginationFailureRetryable = true;
   List<Breed>? _firstPageItems;
@@ -180,7 +181,13 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
           ),
         );
 
-        final isOnline = await _connectivityMonitor.hasConnection;
+        _isStartupConnectivityPending = true;
+        final bool isOnline;
+        try {
+          isOnline = await _connectivityMonitor.hasConnection;
+        } finally {
+          _isStartupConnectivityPending = false;
+        }
         if (requestEpoch != _requestEpoch) {
           return;
         }
@@ -463,7 +470,8 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         !state.hasMore ||
         state.isLoadingMore ||
         state.breeds.isEmpty ||
-        _isRefreshing) {
+        _isRefreshing ||
+        _isStartupConnectivityPending) {
       return;
     }
 
