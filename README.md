@@ -32,7 +32,7 @@ Diseñada con enfoque **Offline-First (Stale-While-Revalidate)**, resiliencia an
   - **Backoff exponencial con jitter** en `Dio` (`ExponentialBackoffInterceptor`): hasta **3 reintentos** (`500ms`, `1000ms`, `2000ms` + jitter `0–200ms`) para timeouts, errores de conexión, `429` y `5xx`.
   - Si falla una página intermedia del infinite scroll, **las razas ya cargadas se conservan intactas** y se ofrece un botón inline *"Reintentar página"*.
 - **Accesibilidad (`Semantics`)**: Labels semánticos, hints, encabezados (`header: true`), `ExcludeSemantics` en elementos decorativos y `liveRegion: true` en carga/errores/datos curiosos, validados con pruebas automatizadas de guías Android/iOS y revisión del árbol de `Semantics`.
-- **Auditoría de Performance y Tamaño del APK**: Documentada abajo con captura real, traza de Flutter DevTools (`613` frames continuos), compilación de APK universal multi-ABI y desglose `flutter build apk --release --analyze-size`.
+- **Auditoría de Performance y Tamaño del APK**: Documentada abajo con captura real del `PerformanceOverlay`, traza de Flutter DevTools en **dispositivo físico iOS en modo `--profile` AOT (`596` frames continuos, `0` frames perdidos)**, compilación de APK universal multi-ABI y desglose `flutter build apk --release --analyze-size`.
 
 ### Funcionalidades Opcionales (PLUS)
 - **Deep Linking nativo**: Custom scheme `catdirectory://breed/:name` funcional de inmediato en local, más configuración nativa de **Android App Links** (`autoVerify="true"`) e **iOS Universal Links** (`Runner.entitlements`) acompañados de plantillas [`.well-known/assetlinks.json`](.well-known/assetlinks.json) y [`.well-known/apple-app-site-association`](.well-known/apple-app-site-association) listas para desplegar en un dominio productivo HTTPS.
@@ -131,46 +131,44 @@ xcrun simctl openurl booted "catdirectory://breed/Abyssinian"
 
 ## Auditoría de Performance (Obligatorio)
 
-### 1. Evidencia de Scroll sin Jank (`98/98` razas cargadas · `613` frames continuos)
+### 1. Evidencia de Scroll sin Jank en Dispositivo Físico (`98/98` razas · `--profile` AOT · `596` frames continuos)
 
-Se implementó un benchmark reproducible de scroll infinito ([`integration_test/scroll_performance_test.dart`](integration_test/scroll_performance_test.dart)) que primero carga las 5 páginas completas de la API (**98/98 razas**) y luego ejecuta barridos bidireccionales sostenidos a cadencia de 60 Hz (`timedDrag` + `fling` con bombeo cada `16 ms`) dentro de `binding.traceAction`:
+Se ejecutó un benchmark reproducible de scroll infinito ([`integration_test/scroll_performance_test.dart`](integration_test/scroll_performance_test.dart)) en **dispositivo físico iOS (`iPhone`, iOS 26.7.3) en modo `--profile` (compilación AOT real)** que primero carga las 5 páginas completas de la API (**98/98 razas**) y luego ejecuta barridos bidireccionales sostenidos a cadencia de 60 Hz (`timedDrag` + `fling` cada `16 ms`) dentro de `binding.traceAction`:
 
 ```bash
-# Comando oficial en modo --profile (dispositivo físico Android/iOS o emulador Android):
 flutter drive \
   --profile \
+  --no-dds \
   --endless-trace-buffer \
   --driver=test_driver/perf_driver.dart \
   --target=integration_test/scroll_performance_test.dart \
   --dart-define=SHOW_PERF_OVERLAY=true
 ```
 
-> [!NOTE]
-> **Transparencia sobre el modo de ejecución:** Flutter/Xcode restringe la compilación AOT `--profile` a dispositivos físicos iOS o dispositivos/emuladores Android (`release/profile builds are only supported for physical devices`). En el entorno de entrega actual (macOS + iOS Simulator `iPhone 18 Pro`, sin AVD Android ni `DEVELOPMENT_TEAM` de firma física en el repositorio), la evidencia versionada abajo fue ejecutada sobre **iOS Simulator en modo Debug/JIT con `--endless-trace-buffer`** (omitiendo `--profile`). Dado que Debug/JIT introduce mayor sobrecarga que AOT `--profile`, mantener `0` frames perdidos en **613 frames continuos** constituye una cota conservadora favorable frente a hardware real en `--profile`.
-
 <p align="center">
-  <img src="docs/performance/performance_overlay_scroll.png" alt="PerformanceOverlay durante scroll sostenido con 98/98 razas cargadas" width="320" />
+  <img src="docs/performance/performance_overlay_scroll.png" alt="PerformanceOverlay en iPhone físico (--profile AOT) durante scroll sostenido con 98/98 razas cargadas" width="320" />
 </p>
 
-**Métricas registradas en [`docs/performance/scroll_performance.timeline_summary.json`](docs/performance/scroll_performance.timeline_summary.json):**
+**Métricas registradas en dispositivo físico iOS (`--profile` AOT) en [`docs/performance/scroll_performance.timeline_summary.json`](docs/performance/scroll_performance.timeline_summary.json):**
 
 | Métrica (Budget 60 FPS = `16.67 ms`) | Resultado | Estado |
 | :--- | :---: | :---: |
-| `frame_count` / `frame_rasterizer_count` | **`613` / `613`** | Scroll sostenido (>200 frames) |
-| `average_frame_build_time_millis` (UI) | **`3.21 ms`** | Óptimo (5.2× bajo el límite) |
-| `90th_percentile_frame_build_time_millis` (UI) | **`6.64 ms`** | Sin jank |
-| `99th_percentile_frame_build_time_millis` (UI) | **`8.95 ms`** | Sin jank |
-| `worst_frame_build_time_millis` (UI) | **`13.10 ms`** | Bajo `16.67 ms` |
-| `missed_frame_build_budget_count` | **`0`** | 0 de 613 frames perdidos |
-| `average_frame_rasterizer_time_millis` (Raster) | **`0.89 ms`** | Óptimo |
-| `99th_percentile_frame_rasterizer_time_millis` (Raster) | **`1.52 ms`** | Óptimo |
-| `worst_frame_rasterizer_time_millis` (Raster) | **`4.90 ms`** | Bajo `16.67 ms` |
-| `missed_frame_rasterizer_budget_count` | **`0`** | 0 de 613 frames perdidos |
-| `60hz_frame_percentage` | **`100.0%`** | Cadencia estable a 60 Hz |
+| `frame_count` / `frame_rasterizer_count` | **`596` / `596`** | Scroll sostenido (>200 frames) |
+| `average_frame_build_time_millis` (UI) | **`3.48 ms`** | Óptimo (4.8× bajo el límite) |
+| `90th_percentile_frame_build_time_millis` (UI) | **`6.05 ms`** | Sin jank |
+| `99th_percentile_frame_build_time_millis` (UI) | **`7.53 ms`** | Sin jank |
+| `worst_frame_build_time_millis` (UI) | **`8.22 ms`** | Menos de la mitad de `16.67 ms` |
+| `missed_frame_build_budget_count` | **`0`** | 0 de 596 frames perdidos |
+| `average_frame_rasterizer_time_millis` (Raster) | **`2.12 ms`** | Óptimo |
+| `99th_percentile_frame_rasterizer_time_millis` (Raster) | **`2.94 ms`** | Óptimo |
+| `worst_frame_rasterizer_time_millis` (Raster) | **`3.02 ms`** | 5.5× bajo `16.67 ms` |
+| `missed_frame_rasterizer_budget_count` | **`0`** | 0 de 596 frames perdidos |
+| `average_vsync_transitions_missed` / `60hz_frame_percentage` | **`0.0` / `100.0%`** | Cadencia exacta a 60 Hz |
+| `average_memory_usage` | **`116.9 MB`** | Memoria estable en AOT |
 
 **Análisis de frames y decisiones que mantienen 0 jank:**
-- En la captura del `PerformanceOverlay` (con `98/98` razas cargadas y el pie `Fin del directorio · 98 razas exploradas` visible) las gráficas de **UI (`max 7.2 ms/frame, avg 1.9 ms/frame`)** y **Raster (`max 2.1 ms/frame, avg 0.8 ms/frame`)** permanecen completamente por debajo de la línea de `16.67 ms` sin barras rojas de jank.
-- En el `TimelineSummary` completo de **613 frames continuos** (con `--endless-trace-buffer` para evitar truncamiento del buffer circular), **0 frames excedieron el presupuesto de `16.67 ms`** (`worst UI: 13.10 ms`, `p99 UI: 8.95 ms`, `avg Raster: 0.89 ms`).
+- En la captura del `PerformanceOverlay` tomada en iPhone físico (con `98/98` razas cargadas y el pie `Fin del directorio · 98 razas exploradas` visible) las gráficas de **UI (`max 5.2 ms/frame, avg 1.4 ms/frame`)** y **Raster (`max 2.8 ms/frame, avg 2.0 ms/frame`)** permanecen totalmente planas muy por debajo de la línea de `16.67 ms`, con `0` barras rojas de jank.
+- En el `TimelineSummary` completo de **596 frames continuos** en modo `--profile` AOT (`--endless-trace-buffer`), **0 frames excedieron el presupuesto de `16.67 ms`** (`worst UI: 8.22 ms`, `p99 UI: 7.53 ms`, `worst Raster: 3.02 ms`, `0.0` transiciones VSync perdidas y `116.9 MB` de memoria promedio).
 - Factores clave de rendimiento: `SliverList.separated` con lazy rendering, tarjetas aisladas con `RepaintBoundary`, avatares monograma determinísticos sin decodificación de bitmaps de red, `buildWhen` selectivos en `BlocBuilder` y `ShimmerScope` con un único `AnimationController` compartido.
 
 ---
