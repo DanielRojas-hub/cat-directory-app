@@ -121,12 +121,15 @@ class PaginationFooter extends StatelessWidget {
     }
 
     if (isSearching && hasMore) {
+      final memoryScopeText = totalCount > 0
+          ? 'Filtrando sobre $loadedCount de $totalCount razas cargadas en memoria'
+          : 'Filtrando sobre $loadedCount razas cargadas en memoria';
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         child: Column(
           children: [
             Text(
-              'Filtrando sobre $loadedCount de $totalCount razas cargadas en memoria',
+              memoryScopeText,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),

@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   characters: ^1.4.1
   material_ui: ^1.11.1
   cupertino_icons: ^1.0.8
