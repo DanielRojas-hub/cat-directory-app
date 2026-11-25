@@ -61,20 +61,16 @@ class CatFactCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                Semantics(
-                  button: true,
-                  label: 'Cargar otro dato curioso aleatorio',
-                  child: IconButton.filledTonal(
-                    onPressed: isLoading ? null : onRefresh,
-                    tooltip: 'Cargar otro dato curioso',
-                    icon: isLoading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh_rounded, size: 18),
-                  ),
+                IconButton.filledTonal(
+                  onPressed: isLoading ? null : onRefresh,
+                  tooltip: 'Cargar otro dato curioso aleatorio',
+                  icon: isLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 18),
                 ),
               ],
             ),
