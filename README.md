@@ -22,8 +22,8 @@ Diseñada con enfoque **Offline-First (Stale-While-Revalidate)**, resiliencia an
 ### Requerimientos Obligatorios
 - **Directorio de razas (`GET /breeds`)**: Listado fluido con `CustomScrollView` + `SliverList.separated` y tarjetas aisladas con `RepaintBoundary` mostrando nombre (`breed`) y país de origen (`country`).
 - **Paginación Infinite Scroll con control de concurrencia**: Carga automática al aproximarse al final de la lista (20 razas por página) protegida con `droppable()` para impedir múltiples requests simultáneos.
-- **Pull to Refresh**: Invalidación explícita de caché local y recarga desde la página 1 (si está offline, conserva la lista y el caché mostrando un aviso amigable).
-- **Búsqueda local con debounce**: Filtrado en memoria por nombre de raza con `debounce(300ms)` sin mutar ni perder la lista cargada, e indicando al usuario si puede cargar más páginas para ampliar el universo en memoria.
+- **Pull to Refresh**: Recarga desde la página 1 con sobrescritura atómica del caché local solo tras respuesta exitosa (preserva intacto el respaldo offline-first si falla la red o no hay conexión, sincronizado con `RefreshIndicator` vía `Completer<void>`).
+- **Búsqueda local con debounce**: Filtrado en memoria por nombre de raza con `debounce(300ms)` al escribir y limpieza instantánea al pulsar `X` (`immediate: true`), sin mutar ni perder la lista cargada, con `keyboardDismissBehavior.onDrag`, sincronía de controlador y botón para cargar más páginas.
 - **Ruteo parametrizado con `GoRouter`**: Pantalla de detalle accesible en `/breed/:name` (con encoding seguro de caracteres/espacios y soporte para resolución en frío cuando `extra` es `null`).
 - **Offline-First (Stale-While-Revalidate) + Caché con TTL explícito**: Persistencia de la página 1 en `SharedPreferences` envuelta en un `CacheEnvelope<T>` con `cachedAt`, **TTL de 10 minutos**, verificación `isExpired()` e invalidación explícita. Al abrir sin conexión, la lista cacheada se renderiza instantáneamente sin pantalla vacía ni error bloqueante.
 - **Vista de Detalle + 2do Endpoint (`GET /fact`)**: Muestra los 5 atributos completos (`Breed`, `Country`, `Origin`, `Coat`, `Pattern`) y un **Dato Curioso Aleatorio** con estado de carga (`FactSkeleton`), manejo de error y botón de recarga totalmente independientes.
@@ -39,7 +39,7 @@ Diseñada con enfoque **Offline-First (Stale-While-Revalidate)**, resiliencia an
 - **Dark Mode**: Temas Material 3 claro/oscuro responsivos automáticamente a la configuración del sistema (`ThemeMode.system`).
 - **Animaciones**: Transiciones `Hero` fluidas del monograma entre la tarjeta del directorio y la cabecera del detalle.
 - **Manejo de ciclo de vida Foreground/Background**: `WidgetsBindingObserver` revalida el caché automáticamente cuando la app regresa a primer plano tras superar el TTL o ≥ 5 minutos en segundo plano.
-- **Testing Unitario + Accesibilidad + Regresión + Integración**: 19 tests automatizados (`bloc_test`, `mocktail`, `flutter_test`) cubriendo BLoC, backoff exponencial, TTL/caché, ruteo, accesibilidad, paginación de 98 razas y temas Light/Dark, más prueba de integración de scroll sostenido (`integration_test/scroll_performance_test.dart`).
+- **Testing Unitario + Accesibilidad + Regresión UI/QA + Integración**: **95 tests automatizados** (`bloc_test`, `mocktail`, `flutter_test`) cubriendo BLoC/concurrencia/TTL, backoff exponencial (`IOException`/5xx), conectividad, mapeo `AppFailure`, ruteo/deep links, accesibilidad (`SemanticsAction.tap`), stress responsivo (`320px`, Landscape, `textScaler` `1.5x–2.0x`), paginación de 98 razas y temas Light/Dark, más prueba de integración de scroll sostenido (`integration_test/scroll_performance_test.dart`).
 - **APK Release precompilado**: Disponible en la sección de [Releases](https://github.com/DanielRojas-hub/cat-directory-app/releases) del repositorio (APK universal multi-ABI y `arm64-v8a`).
 
 ---
@@ -70,7 +70,7 @@ lib/
 Para un MVP de cuidado de mascotas con proyección de crecimiento (futuros módulos de perfil, vacunas, favoritos), agrupar primero por feature maximiza la cohesión y permite escalar en equipo sin mezclar archivos entre módulos, manteniendo la regla de dependencia de Clean Architecture (la UI solo conoce estados/eventos y el dominio es independiente de Dio o `SharedPreferences`).
 
 ### ¿Por qué BLoC (`flutter_bloc` + `bloc_concurrency`)?
-- **Transformadores de eventos de primera clase**: `droppable()` garantiza control estricto de concurrencia en `BreedsNextPageRequested` y `BreedsRefreshed`, mientras `debounce(300ms)` (`stream_transform`) controla la búsqueda local de forma declarativa y sin timers manuales propensos a fugas.
+- **Transformadores de eventos y control de concurrencia de primera clase**: `droppable()` evita duplicados en `BreedsStarted`, `BreedsNextPageRequested` y `BreedsAppResumed`, complementado con época de generación (`_requestEpoch`) y `Completer<void>` en `BreedsRefreshed` para impedir condiciones de carrera entre SWR, refresh y paginación; `debounce(300ms)` con bypass inmediato (`immediate: true`) controla la búsqueda local sin lag al limpiar.
 - **Trazabilidad y testabilidad**: Cada transición (`SWR cache → revalidating → fresh`, `offline → online recovery`, `intermediate page failure`) es un estado inmutable generado con `freezed`, 100% verificable con `bloc_test`.
 - **Separación de ciclos de vida**: `BreedDetailCubit` gestiona de forma desacoplada la resolución de la raza (incluido el lookup paginado para Deep Links en frío) y el estado independiente del endpoint `/fact`.
 
@@ -171,7 +171,7 @@ flutter drive \
 **Análisis de frames y decisiones que mantienen 0 jank:**
 - En la captura del `PerformanceOverlay` (con `98/98` razas cargadas y el pie `Fin del directorio · 98 razas exploradas` visible) las gráficas de **UI (`max 7.2 ms/frame, avg 1.9 ms/frame`)** y **Raster (`max 2.1 ms/frame, avg 0.8 ms/frame`)** permanecen completamente por debajo de la línea de `16.67 ms` sin barras rojas de jank.
 - En el `TimelineSummary` completo de **613 frames continuos** (con `--endless-trace-buffer` para evitar truncamiento del buffer circular), **0 frames excedieron el presupuesto de `16.67 ms`** (`worst UI: 13.10 ms`, `p99 UI: 8.95 ms`, `avg Raster: 0.89 ms`).
-- Factores clave de rendimiento: `SliverList.separated` con lazy rendering, tarjetas aisladas con `RepaintBoundary`, avatares monograma determinísticos sin decodificación de bitmaps de red, `buildWhen` selectivos en `BlocBuilder` y skeleton loader custom ligero.
+- Factores clave de rendimiento: `SliverList.separated` con lazy rendering, tarjetas aisladas con `RepaintBoundary`, avatares monograma determinísticos sin decodificación de bitmaps de red, `buildWhen` selectivos en `BlocBuilder` y `ShimmerScope` con un único `AnimationController` compartido.
 
 ---
 
