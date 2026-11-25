@@ -45,10 +45,12 @@ class PaginationFooter extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2.2),
               ),
               const SizedBox(width: 12),
-              Text(
-                'Cargando más razas...',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
+              Flexible(
+                child: Text(
+                  'Cargando más razas...',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ],
@@ -156,10 +158,13 @@ class PaginationFooter extends StatelessWidget {
                 color: colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
-              Text(
-                'Fin del directorio · $loadedCount razas exploradas',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
+              Flexible(
+                child: Text(
+                  'Fin del directorio · $loadedCount razas exploradas',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ],

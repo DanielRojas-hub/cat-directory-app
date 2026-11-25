@@ -33,7 +33,10 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     );
     on<BreedsSearchQueryChanged>(
       _onSearchQueryChanged,
-      transformer: debounceTransformer(searchDebounceDuration),
+      transformer: debounceTransformer(
+        searchDebounceDuration,
+        shouldDebounce: (event) => !event.immediate,
+      ),
     );
     on<BreedsConnectivityChanged>(_onConnectivityChanged);
     on<BreedsAppResumed>(_onAppResumed, transformer: droppableTransformer());

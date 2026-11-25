@@ -1,3 +1,4 @@
+import 'package:characters/characters.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'breed.freezed.dart';
@@ -22,18 +23,32 @@ abstract class Breed with _$Breed {
   /// URL-safe slug used in `/breed/:name` parameterized routes.
   String get routeSlug => Uri.encodeComponent(breed);
 
+  static final RegExp _nonWordChars = RegExp(
+    r'[^\p{L}\p{M}\p{N}\s]+',
+    unicode: true,
+  );
+  static final RegExp _leadingMarks = RegExp(r'^\p{M}+', unicode: true);
+  static final RegExp _hasLetterOrDigit = RegExp(
+    r'[\p{L}\p{N}]',
+    unicode: true,
+  );
+
   /// Two-letter monogram for lightweight avatar rendering without image network cost.
   String get initials {
-    final parts = breed
-        .trim()
+    final cleaned = breed.replaceAll(_nonWordChars, ' ').trim();
+    if (cleaned.isEmpty) return '?';
+
+    final parts = cleaned
         .split(RegExp(r'\s+'))
-        .where((p) => p.isNotEmpty)
-        .toList();
+        .map((p) => p.replaceFirst(_leadingMarks, ''))
+        .where((p) => p.isNotEmpty && _hasLetterOrDigit.hasMatch(p))
+        .toList(growable: false);
     if (parts.isEmpty) return '?';
     if (parts.length == 1) {
-      return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
+      return parts.first.characters.take(2).toString().toUpperCase();
     }
-    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return '${parts[0].characters.first}${parts[1].characters.first}'
+        .toUpperCase();
   }
 
   static String _fallback(String value, String fallback) {

@@ -30,56 +30,96 @@ class BreedDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Volver al directorio',
-          onPressed: () => _handleBack(context),
-          icon: const Icon(Icons.arrow_back_rounded),
+    final canPop = context.canPop();
+
+    return PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Volver al directorio',
+            onPressed: () => _handleBack(context),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          title: BlocSelector<BreedDetailCubit, BreedDetailState, String>(
+            selector: (state) {
+              final resolved = state.breed?.breed.trim();
+              return (resolved != null && resolved.isNotEmpty)
+                  ? resolved
+                  : breedName;
+            },
+            builder: (context, resolvedTitle) {
+              return Text(
+                resolvedTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              );
+            },
+          ),
         ),
-        title: Text(
-          breedName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      body: BlocBuilder<BreedDetailCubit, BreedDetailState>(
-        builder: (context, state) {
-          return switch (state.breedStatus) {
-            BreedDetailStatus.initial || BreedDetailStatus.loading => Semantics(
-                liveRegion: true,
-                label: 'Cargando detalles de la raza $breedName',
-                excludeSemantics: true,
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Cargando detalles de la raza...'),
-                    ],
+        body: SafeArea(
+          top: false,
+          child: BlocBuilder<BreedDetailCubit, BreedDetailState>(
+            builder: (context, state) {
+              return switch (state.breedStatus) {
+                BreedDetailStatus.initial || BreedDetailStatus.loading =>
+                  Semantics(
+                    liveRegion: true,
+                    label: 'Cargando detalles de la raza $breedName',
+                    excludeSemantics: true,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight,
+                            ),
+                            child: const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(24),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      'Cargando detalles de la raza...',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
-              ),
-            BreedDetailStatus.failure => _BreedLookupErrorView(
-                breedName: breedName,
-                message: state.breedErrorMessage ??
-                    'No encontramos los detalles de esta raza.',
-                onRetry: () => context
-                    .read<BreedDetailCubit>()
-                    .retryBreedLookup(breedName),
-                onGoHome: () => context.go(AppRoutes.home),
-              ),
-            BreedDetailStatus.loaded => _BreedDetailContent(
-                breed: state.breed!,
-                factStatus: state.factStatus,
-                fact: state.fact,
-                factErrorMessage: state.factErrorMessage,
-                onRefreshFact: () =>
-                    context.read<BreedDetailCubit>().loadRandomFact(),
-              ),
-          };
-        },
+                BreedDetailStatus.failure => _BreedLookupErrorView(
+                    breedName: breedName,
+                    message: state.breedErrorMessage ??
+                        'No encontramos los detalles de esta raza.',
+                    onRetry: () => context
+                        .read<BreedDetailCubit>()
+                        .retryBreedLookup(breedName),
+                    onGoHome: () => context.go(AppRoutes.home),
+                  ),
+                BreedDetailStatus.loaded => _BreedDetailContent(
+                    breed: state.breed!,
+                    factStatus: state.factStatus,
+                    fact: state.fact,
+                    factErrorMessage: state.factErrorMessage,
+                    onRefreshFact: () =>
+                        context.read<BreedDetailCubit>().loadRandomFact(),
+                  ),
+              };
+            },
+          ),
+        ),
       ),
     );
   }
@@ -294,56 +334,65 @@ class _BreedLookupErrorView extends StatelessWidget {
     return Semantics(
       liveRegion: true,
       container: true,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ExcludeSemantics(
-                child: Icon(
-                  Icons.search_off_rounded,
-                  size: 54,
-                  color: colorScheme.error,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'No pudimos cargar "$breedName"',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Wrap(
-                spacing: 12,
-                runSpacing: 10,
-                alignment: WrapAlignment.center,
-                children: [
-                  FilledButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Reintentar'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ExcludeSemantics(
+                        child: Icon(
+                          Icons.search_off_rounded,
+                          size: 54,
+                          color: colorScheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No pudimos cargar "$breedName"',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        message,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: onRetry,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Reintentar'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: onGoHome,
+                            icon: const Icon(Icons.home_outlined),
+                            label: const Text('Ir al directorio'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  OutlinedButton.icon(
-                    onPressed: onGoHome,
-                    icon: const Icon(Icons.home_outlined),
-                    label: const Text('Ir al directorio'),
-                  ),
-                ],
+                ),
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
