@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/errors/app_failure.dart';
@@ -12,7 +14,7 @@ import 'event_transformers.dart';
 
 /// Reactive BLoC managing the cat breeds directory with:
 /// - Offline-first Stale-While-Revalidate (SWR) startup respecting cache TTL
-/// - Generation-based (`_requestEpoch`) concurrency protection across loads
+/// - Real [CancelToken] cancellation and generation-based (`_requestEpoch`) protection
 /// - `droppable()` concurrency control on startup, pagination and resume
 /// - `debounce()` local in-memory search
 /// - Reactive connectivity auto-recovery and foreground revalidation
@@ -56,22 +58,80 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
   int _noticeCounter = 0;
   int _requestEpoch = 0;
   bool _isRefreshing = false;
-  final Set<Completer<void>> _pendingRefreshCompleters = <Completer<void>>{};
+  bool _lastStartFailureRetryable = true;
+  bool _lastPaginationFailureRetryable = true;
+  List<Breed>? _firstPageItems;
+  CancelToken? _firstPageCancelToken;
+  CancelToken? _paginationCancelToken;
+  final Set<Completer<void>> _queuedRefreshCompleters = <Completer<void>>{};
+  final Set<Completer<void>> _activeRefreshCompleters = <Completer<void>>{};
 
   @override
   void onEvent(BreedsEvent event) {
     super.onEvent(event);
     if (event is BreedsRefreshed && event.completer != null) {
-      _pendingRefreshCompleters.add(event.completer!);
+      _queuedRefreshCompleters.add(event.completer!);
     }
   }
 
-  void _completeRefreshCompleter(Completer<void>? completer) {
-    if (completer == null) return;
-    _pendingRefreshCompleters.remove(completer);
-    if (!completer.isCompleted) {
-      completer.complete();
+  void _completeCompleters(Set<Completer<void>> completers) {
+    for (final completer in List<Completer<void>>.of(completers)) {
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
     }
+    completers.clear();
+  }
+
+  void _cancelToken(CancelToken? token, String reason) {
+    if (token != null && !token.isCancelled) {
+      token.cancel(reason);
+    }
+  }
+
+  CancelToken _replaceFirstPageCancelToken(String reason) {
+    _cancelToken(_firstPageCancelToken, reason);
+    final nextToken = CancelToken();
+    _firstPageCancelToken = nextToken;
+    return nextToken;
+  }
+
+  Future<T> _awaitCancellable<T>(
+    Future<T> future,
+    CancelToken cancelToken,
+  ) {
+    if (cancelToken.isCancelled) {
+      return Future<T>.error(
+        AppFailure.fromDioException(
+          DioException.requestCancelled(
+            requestOptions: RequestOptions(path: '/breeds'),
+            reason: cancelToken.cancelError?.error,
+          ),
+        ),
+      );
+    }
+
+    final completer = Completer<T>();
+    future.then(
+      (value) {
+        if (!completer.isCompleted) {
+          completer.complete(value);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+    );
+    unawaited(
+      cancelToken.whenCancel.then((cancelError) {
+        if (!completer.isCompleted) {
+          completer.completeError(AppFailure.fromDioException(cancelError));
+        }
+      }),
+    );
+    return completer.future;
   }
 
   BreedsNotice _buildNotice(String message, BreedsNoticeKind kind) {
@@ -89,15 +149,17 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     final requestEpoch = ++_requestEpoch;
 
     try {
-      final isOnline = await _connectivityMonitor.hasConnection;
-      if (requestEpoch != _requestEpoch) {
-        return;
-      }
-
+      // Read local cache synchronously BEFORE awaiting connectivity to eliminate
+      // any skeleton frame flash on cold start when cached breeds exist.
       final cached = _repository.getCachedFirstPage();
 
       if (cached != null && cached.page.items.isNotEmpty) {
-        final shouldRevalidate = isOnline && cached.isExpired;
+        _firstPageItems = cached.page.items;
+        _lastStartFailureRetryable = true;
+
+        final optimisticOnline = state.isOnline;
+        final optimisticShouldRevalidate =
+            optimisticOnline && cached.isExpired;
 
         // Offline-first SWR: render cached page 1 instantaneously.
         // When online with a fresh cache (< TTL), avoid redundant fetches and
@@ -109,14 +171,33 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
             currentPage: cached.page.currentPage,
             lastPage: cached.page.lastPage,
             total: cached.page.total,
-            isFromCache: !isOnline || cached.isExpired,
-            isRevalidating: shouldRevalidate,
-            isOnline: isOnline,
+            isFromCache: !optimisticOnline || cached.isExpired,
+            isRevalidating: optimisticShouldRevalidate,
+            isOnline: optimisticOnline,
             lastSyncedAt: cached.cachedAt,
             errorMessage: null,
             paginationErrorMessage: null,
           ),
         );
+
+        final isOnline = await _connectivityMonitor.hasConnection;
+        if (requestEpoch != _requestEpoch) {
+          return;
+        }
+
+        final shouldRevalidate = isOnline && cached.isExpired;
+        final targetIsFromCache = !isOnline || cached.isExpired;
+        if (state.isOnline != isOnline ||
+            state.isFromCache != targetIsFromCache ||
+            state.isRevalidating != shouldRevalidate) {
+          emit(
+            state.copyWith(
+              isOnline: isOnline,
+              isFromCache: targetIsFromCache,
+              isRevalidating: shouldRevalidate,
+            ),
+          );
+        }
 
         if (!shouldRevalidate) {
           return;
@@ -131,49 +212,88 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         return;
       }
 
+      final isOnline = await _connectivityMonitor.hasConnection;
+      if (requestEpoch != _requestEpoch) {
+        return;
+      }
+
+      if (!isOnline) {
+        const offlineFailure = NetworkFailure();
+        _lastStartFailureRetryable = offlineFailure.isRetryable;
+        emit(
+          state.copyWith(
+            status: BreedsStatus.failure,
+            isOnline: false,
+            isRevalidating: false,
+            isLoadingMore: false,
+            errorMessage: offlineFailure.message,
+            paginationErrorMessage: null,
+          ),
+        );
+        return;
+      }
+
       // No local cache available: show loading skeleton and fetch page 1.
       emit(
         state.copyWith(
           status: BreedsStatus.loading,
-          isOnline: isOnline,
-          isRevalidating: false,
-          isLoadingMore: false,
-          errorMessage: null,
-          paginationErrorMessage: null,
-        ),
-      );
-
-      final page = await _repository.fetchBreedsPage(page: 1);
-      if (requestEpoch != _requestEpoch) {
-        return;
-      }
-
-      emit(
-        state.copyWith(
-          status: BreedsStatus.loaded,
-          breeds: page.items,
-          currentPage: page.currentPage,
-          lastPage: page.lastPage,
-          total: page.total,
-          isFromCache: false,
-          isRevalidating: false,
-          isLoadingMore: false,
           isOnline: true,
-          lastSyncedAt: _clock().toUtc(),
+          isRevalidating: false,
+          isLoadingMore: false,
           errorMessage: null,
           paginationErrorMessage: null,
         ),
       );
+
+      final cancelToken = _replaceFirstPageCancelToken(
+        'Superseded by new initial load',
+      );
+      try {
+        final page = await _awaitCancellable(
+          _repository.fetchBreedsPage(page: 1, cancelToken: cancelToken),
+          cancelToken,
+        );
+        if (requestEpoch != _requestEpoch || cancelToken.isCancelled) {
+          return;
+        }
+
+        _firstPageItems = page.items;
+        _lastStartFailureRetryable = true;
+        _lastPaginationFailureRetryable = true;
+
+        emit(
+          state.copyWith(
+            status: BreedsStatus.loaded,
+            breeds: page.items,
+            currentPage: page.currentPage,
+            lastPage: page.lastPage,
+            total: page.total,
+            isFromCache: false,
+            isRevalidating: false,
+            isLoadingMore: false,
+            isOnline: true,
+            lastSyncedAt: _clock().toUtc(),
+            errorMessage: null,
+            paginationErrorMessage: null,
+          ),
+        );
+      } finally {
+        if (identical(_firstPageCancelToken, cancelToken)) {
+          _firstPageCancelToken = null;
+        }
+      }
     } on AppFailure catch (failure) {
-      if (requestEpoch != _requestEpoch) {
+      if (requestEpoch != _requestEpoch || failure.isCancellation) {
         return;
       }
+      _lastStartFailureRetryable = failure.isRetryable;
       _emitStartFailure(emit, failure.message);
     } on Object {
       if (requestEpoch != _requestEpoch) {
         return;
       }
       const fallback = UnknownFailure();
+      _lastStartFailureRetryable = fallback.isRetryable;
       _emitStartFailure(emit, fallback.message);
     }
   }
@@ -206,30 +326,47 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     BreedsRefreshed event,
     Emitter<BreedsState> emit,
   ) async {
+    final completer = event.completer;
+    if (completer != null) {
+      _queuedRefreshCompleters.remove(completer);
+      _activeRefreshCompleters.add(completer);
+    }
+
     if (_isRefreshing) {
-      _completeRefreshCompleter(event.completer);
+      // Share completion with the active refresh so RefreshIndicator stays
+      // open until the in-flight request finishes.
       return;
     }
 
     _isRefreshing = true;
     int? requestEpoch;
+    CancelToken? cancelToken;
 
     try {
       final isOnline = await _connectivityMonitor.hasConnection;
 
       if (!isOnline) {
+        final offlineMessage = state.breeds.isNotEmpty
+            ? 'Sin conexión a internet. Mostrando los datos guardados.'
+            : const NetworkFailure().message;
         emit(
           state.copyWith(
             isOnline: false,
             isRevalidating: false,
             notice: _buildNotice(
-              'Sin conexión a internet. Mostrando los datos guardados.',
+              offlineMessage,
               BreedsNoticeKind.warning,
             ),
           ),
         );
         return;
       }
+
+      // Cancel any in-flight pagination or stale page-1 request so droppable()
+      // pagination handlers unblock immediately after Pull-to-Refresh.
+      _cancelToken(_paginationCancelToken, 'Cancelled by Pull-to-Refresh');
+      _paginationCancelToken = null;
+      cancelToken = _replaceFirstPageCancelToken('Cancelled by Pull-to-Refresh');
 
       // Preserve offline-first local backup until remote page 1 succeeds;
       // BreedsRepository.fetchBreedsPage(page: 1) atomically overwrites cache.
@@ -244,10 +381,17 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
 
-      final page = await _repository.fetchBreedsPage(page: 1);
-      if (requestEpoch != _requestEpoch) {
+      final page = await _awaitCancellable(
+        _repository.fetchBreedsPage(page: 1, cancelToken: cancelToken),
+        cancelToken,
+      );
+      if (requestEpoch != _requestEpoch || cancelToken.isCancelled) {
         return;
       }
+
+      _firstPageItems = page.items;
+      _lastStartFailureRetryable = true;
+      _lastPaginationFailureRetryable = true;
 
       emit(
         state.copyWith(
@@ -266,19 +410,26 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (requestEpoch != null && requestEpoch != _requestEpoch) {
+      if ((requestEpoch != null && requestEpoch != _requestEpoch) ||
+          failure.isCancellation) {
         return;
       }
+      _lastStartFailureRetryable = failure.isRetryable;
       _emitRefreshFailure(emit, failure.message);
     } on Object {
       if (requestEpoch != null && requestEpoch != _requestEpoch) {
         return;
       }
       const fallback = UnknownFailure();
+      _lastStartFailureRetryable = fallback.isRetryable;
       _emitRefreshFailure(emit, fallback.message);
     } finally {
+      if (cancelToken != null &&
+          identical(_firstPageCancelToken, cancelToken)) {
+        _firstPageCancelToken = null;
+      }
       _isRefreshing = false;
-      _completeRefreshCompleter(event.completer);
+      _completeCompleters(_activeRefreshCompleters);
     }
   }
 
@@ -318,6 +469,9 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
 
     final requestEpoch = _requestEpoch;
     final nextPage = state.currentPage + 1;
+    final cancelToken = CancelToken();
+    _paginationCancelToken = cancelToken;
+
     emit(
       state.copyWith(
         isLoadingMore: true,
@@ -326,11 +480,20 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     );
 
     try {
-      final page = await _repository.fetchBreedsPage(page: nextPage);
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      final page = await _awaitCancellable(
+        _repository.fetchBreedsPage(
+          page: nextPage,
+          cancelToken: cancelToken,
+        ),
+        cancelToken,
+      );
+      if (cancelToken.isCancelled ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
 
+      _lastPaginationFailureRetryable = true;
       final merged = _mergeUniqueBreeds(state.breeds, page.items);
 
       emit(
@@ -346,9 +509,13 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      if (cancelToken.isCancelled ||
+          failure.isCancellation ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
+      _lastPaginationFailureRetryable = failure.isRetryable;
       // Preserve all already-loaded breeds when an intermediate page fails.
       emit(
         state.copyWith(
@@ -361,10 +528,13 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
     } on Object {
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      if (cancelToken.isCancelled ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
       const fallback = UnknownFailure();
+      _lastPaginationFailureRetryable = fallback.isRetryable;
       emit(
         state.copyWith(
           isLoadingMore: false,
@@ -375,6 +545,10 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
           ),
         ),
       );
+    } finally {
+      if (identical(_paginationCancelToken, cancelToken)) {
+        _paginationCancelToken = null;
+      }
     }
   }
 
@@ -390,46 +564,76 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     Emitter<BreedsState> emit,
   ) async {
     try {
-      final wasOffline = !state.isOnline;
       if (state.isOnline == event.isOnline) {
         return;
       }
 
       if (!event.isOnline) {
+        final BreedsNotice? offlineNotice;
+        if (state.breeds.isNotEmpty) {
+          offlineNotice = _buildNotice(
+            'Conexión perdida. Puedes seguir explorando los datos cargados.',
+            BreedsNoticeKind.warning,
+          );
+        } else if (state.status == BreedsStatus.initial) {
+          // Cold start offline with no loaded data and no prior connection loss.
+          offlineNotice = null;
+        } else {
+          offlineNotice = _buildNotice(
+            const NetworkFailure().message,
+            BreedsNoticeKind.warning,
+          );
+        }
+
         emit(
           state.copyWith(
             isOnline: false,
-            notice: _buildNotice(
-              'Conexión perdida. Puedes seguir explorando los datos cargados.',
-              BreedsNoticeKind.warning,
-            ),
+            notice: offlineNotice,
           ),
         );
         return;
       }
 
+      final shouldReloadFromStart =
+          (state.status == BreedsStatus.failure &&
+              _lastStartFailureRetryable) ||
+          (state.status != BreedsStatus.failure && state.breeds.isEmpty);
+
       final shouldRevalidateCache =
+          !shouldReloadFromStart &&
           state.status == BreedsStatus.loaded &&
           state.breeds.isNotEmpty &&
           state.isFromCache &&
           !state.isRevalidating &&
           !_isRefreshing;
 
-      // Recovered connectivity: auto-recover stale cache or failed loads.
+      final shouldRetryPagination =
+          !shouldReloadFromStart &&
+          !shouldRevalidateCache &&
+          state.paginationErrorMessage != null &&
+          state.hasMore &&
+          _lastPaginationFailureRetryable;
+
+      final willSync =
+          shouldReloadFromStart ||
+          shouldRevalidateCache ||
+          shouldRetryPagination;
+
+      // Recovered connectivity: auto-recover stale cache or retryable failed loads.
       emit(
         state.copyWith(
           isOnline: true,
           isRevalidating: shouldRevalidateCache ? true : state.isRevalidating,
-          notice: wasOffline
-              ? _buildNotice(
-                  'Conexión restaurada. Sincronizando directorio...',
-                  BreedsNoticeKind.info,
-                )
-              : null,
+          notice: _buildNotice(
+            willSync
+                ? 'Conexión restaurada. Sincronizando directorio...'
+                : 'Conexión restaurada.',
+            BreedsNoticeKind.info,
+          ),
         ),
       );
 
-      if (state.status == BreedsStatus.failure || state.breeds.isEmpty) {
+      if (shouldReloadFromStart) {
         add(const BreedsStarted());
       } else if (shouldRevalidateCache) {
         await _revalidateFirstPage(
@@ -437,7 +641,7 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
           requestEpoch: _requestEpoch,
           showFailureNotice: false,
         );
-      } else if (state.paginationErrorMessage != null && state.hasMore) {
+      } else if (shouldRetryPagination) {
         add(const BreedsNextPageRequested());
       }
     } on Object {
@@ -503,16 +707,50 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
     required int requestEpoch,
     required bool showFailureNotice,
   }) async {
+    final cancelToken = _replaceFirstPageCancelToken(
+      'Superseded by new page-1 revalidation',
+    );
     try {
-      final freshPage = await _repository.fetchBreedsPage(page: 1);
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      final freshPage = await _awaitCancellable(
+        _repository.fetchBreedsPage(page: 1, cancelToken: cancelToken),
+        cancelToken,
+      );
+      if (cancelToken.isCancelled ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
 
       if (state.currentPage > 1) {
-        // Refresh page 1 cache without disrupting deeper scroll progress.
+        if (freshPage.items.isEmpty) {
+          emit(
+            state.copyWith(
+              isRevalidating: false,
+              isOnline: true,
+              lastSyncedAt: _clock().toUtc(),
+            ),
+          );
+          return;
+        }
+
+        // Update page-1 slice in place while preserving items loaded from pages > 1.
+        final updatedBreeds = _mergeRevalidatedFirstPage(
+          freshFirstPage: freshPage.items,
+          currentBreeds: state.breeds,
+        );
+        _firstPageItems = freshPage.items;
+
+        final nextLastPage = freshPage.lastPage;
+        final nextCurrentPage = nextLastPage > 0
+            ? math.min(state.currentPage, nextLastPage)
+            : state.currentPage;
+
         emit(
           state.copyWith(
+            breeds: updatedBreeds,
+            currentPage: nextCurrentPage,
+            lastPage: nextLastPage,
+            total: freshPage.total,
             isRevalidating: false,
             isFromCache: false,
             isOnline: true,
@@ -521,6 +759,8 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         );
         return;
       }
+
+      _firstPageItems = freshPage.items;
 
       emit(
         state.copyWith(
@@ -538,13 +778,16 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      if (cancelToken.isCancelled ||
+          failure.isCancellation ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
       emit(
         state.copyWith(
           isRevalidating: false,
-          notice: showFailureNotice
+          notice: showFailureNotice && state.breeds.isNotEmpty
               ? _buildNotice(
                   'Mostrando datos guardados (${failure.message})',
                   BreedsNoticeKind.warning,
@@ -553,14 +796,16 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
         ),
       );
     } on Object {
-      if (requestEpoch != _requestEpoch || _isRefreshing) {
+      if (cancelToken.isCancelled ||
+          requestEpoch != _requestEpoch ||
+          _isRefreshing) {
         return;
       }
       const fallback = UnknownFailure();
       emit(
         state.copyWith(
           isRevalidating: false,
-          notice: showFailureNotice
+          notice: showFailureNotice && state.breeds.isNotEmpty
               ? _buildNotice(
                   'Mostrando datos guardados (${fallback.message})',
                   BreedsNoticeKind.warning,
@@ -568,10 +813,35 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
               : null,
         ),
       );
+    } finally {
+      if (identical(_firstPageCancelToken, cancelToken)) {
+        _firstPageCancelToken = null;
+      }
     }
   }
 
-  List<Breed> _mergeUniqueBreeds(List<Breed> existing, List<Breed> incoming) {
+  List<Breed> _mergeRevalidatedFirstPage({
+    required List<Breed> freshFirstPage,
+    required List<Breed> currentBreeds,
+  }) {
+    final previousFirstPage = _firstPageItems;
+    final Iterable<Breed> tailBreeds;
+    if (previousFirstPage != null && previousFirstPage.isNotEmpty) {
+      final staleFirstPageNames =
+          previousFirstPage.map((b) => b.breed.toLowerCase()).toSet();
+      tailBreeds = currentBreeds.where(
+        (b) => !staleFirstPageNames.contains(b.breed.toLowerCase()),
+      );
+    } else {
+      tailBreeds = currentBreeds;
+    }
+    return _mergeUniqueBreeds(freshFirstPage, tailBreeds);
+  }
+
+  List<Breed> _mergeUniqueBreeds(
+    List<Breed> existing,
+    Iterable<Breed> incoming,
+  ) {
     final seen = existing.map((b) => b.breed.toLowerCase()).toSet();
     final result = List<Breed>.of(existing);
     for (final breed in incoming) {
@@ -584,13 +854,13 @@ final class BreedsBloc extends Bloc<BreedsEvent, BreedsState> {
 
   @override
   Future<void> close() async {
+    _cancelToken(_paginationCancelToken, 'BreedsBloc closed');
+    _paginationCancelToken = null;
+    _cancelToken(_firstPageCancelToken, 'BreedsBloc closed');
+    _firstPageCancelToken = null;
     await _connectivitySubscription?.cancel();
-    for (final completer in List<Completer<void>>.of(_pendingRefreshCompleters)) {
-      if (!completer.isCompleted) {
-        completer.complete();
-      }
-    }
-    _pendingRefreshCompleters.clear();
+    _completeCompleters(_activeRefreshCompleters);
+    _completeCompleters(_queuedRefreshCompleters);
     return super.close();
   }
 }

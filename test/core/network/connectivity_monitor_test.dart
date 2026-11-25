@@ -17,55 +17,56 @@ void main() {
       monitor = ConnectivityPlusMonitor(connectivity: connectivity);
     });
 
-    test('returns true for real network interfaces (wifi, mobile, ethernet, vpn)',
+    test(
+        'returns true for active interfaces including ConnectivityResult.other (USB tethering) and bluetooth',
         () async {
-      for (final validInterface in const [
+      for (final activeInterface in const [
         ConnectivityResult.wifi,
         ConnectivityResult.mobile,
         ConnectivityResult.ethernet,
         ConnectivityResult.vpn,
+        ConnectivityResult.other,
+        ConnectivityResult.bluetooth,
       ]) {
         when(() => connectivity.checkConnectivity())
-            .thenAnswer((_) async => [validInterface]);
+            .thenAnswer((_) async => [activeInterface]);
 
         expect(
           await monitor.hasConnection,
           isTrue,
-          reason: '$validInterface should be treated as connected',
+          reason: '$activeInterface should not be fast-failed as offline',
         );
       }
     });
 
-    test('returns false for non-internet interfaces (none, bluetooth, other, empty)',
+    test('fast-fails as offline only when results are empty or exclusively none',
         () async {
-      for (final nonInternet in const <List<ConnectivityResult>>[
+      for (final offlineResult in const <List<ConnectivityResult>>[
         [ConnectivityResult.none],
-        [ConnectivityResult.bluetooth],
-        [ConnectivityResult.other],
-        [ConnectivityResult.bluetooth, ConnectivityResult.other],
+        [ConnectivityResult.none, ConnectivityResult.none],
         [],
       ]) {
         when(() => connectivity.checkConnectivity())
-            .thenAnswer((_) async => nonInternet);
+            .thenAnswer((_) async => offlineResult);
 
         expect(
           await monitor.hasConnection,
           isFalse,
-          reason: '$nonInternet should not be treated as connected',
+          reason: '$offlineResult should be treated as offline',
         );
       }
     });
 
-    test('returns true when mixed results include at least one valid interface',
+    test('returns true when mixed results include none alongside an active interface',
         () async {
       when(() => connectivity.checkConnectivity()).thenAnswer(
-        (_) async => [ConnectivityResult.bluetooth, ConnectivityResult.wifi],
+        (_) async => [ConnectivityResult.none, ConnectivityResult.other],
       );
 
       expect(await monitor.hasConnection, isTrue);
     });
 
-    test('onStatusChanged filters non-network interfaces and deduplicates events',
+    test('onStatusChanged deduplicates status transitions and allows other',
         () async {
       final controller = StreamController<List<ConnectivityResult>>();
       addTearDown(controller.close);
@@ -80,8 +81,9 @@ void main() {
       controller
         ..add([ConnectivityResult.wifi])
         ..add([ConnectivityResult.mobile])
-        ..add([ConnectivityResult.bluetooth])
+        ..add([ConnectivityResult.other])
         ..add([ConnectivityResult.none])
+        ..add([])
         ..add([ConnectivityResult.other])
         ..add([ConnectivityResult.vpn])
         ..add([ConnectivityResult.ethernet]);

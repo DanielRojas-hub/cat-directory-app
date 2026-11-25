@@ -4,12 +4,16 @@ import 'package:cat_directory_app/features/breeds/data/datasources/breeds_local_
 import 'package:cat_directory_app/features/breeds/data/datasources/breeds_remote_datasource.dart';
 import 'package:cat_directory_app/features/breeds/data/models/breed_model.dart';
 import 'package:cat_directory_app/features/breeds/data/models/breeds_page_model.dart';
+import 'package:cat_directory_app/features/breeds/data/models/cat_fact_model.dart';
 import 'package:cat_directory_app/features/breeds/data/repositories/breeds_repository_impl.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockRemoteDataSource extends Mock implements BreedsRemoteDataSource {}
+
+class _MockLocalDataSource extends Mock implements BreedsLocalDataSource {}
 
 void main() {
   group('BreedsRepositoryImpl (TTL cache & Deep Link lookup)', () {
@@ -210,6 +214,141 @@ void main() {
         () => remoteDataSource.fetchBreedsPage(
           page: any(named: 'page'),
           limit: any(named: 'limit'),
+        ),
+      );
+    });
+
+    test('does not persist or overwrite cached page 1 when remote returns data: []',
+        () async {
+      const emptyPage1 = BreedsPageModel(
+        currentPage: 1,
+        lastPage: 1,
+        total: 0,
+        data: [],
+      );
+      var calls = 0;
+      when(
+        () => remoteDataSource.fetchBreedsPage(page: 1, limit: 20),
+      ).thenAnswer((_) async {
+        calls++;
+        return calls == 1 ? page1Model : emptyPage1;
+      });
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+      );
+
+      // Seed valid offline backup first.
+      await repository.fetchBreedsPage(page: 1);
+      expect(repository.getCachedFirstPage()?.page.items.length, 1);
+
+      // Subsequent empty page 1 must NOT poison persisted cache.
+      final emptyResult = await repository.fetchBreedsPage(page: 1);
+      expect(emptyResult.items, isEmpty);
+
+      final preservedCache = repository.getCachedFirstPage();
+      expect(preservedCache, isNotNull);
+      expect(preservedCache!.page.items.single.breed, 'Abyssinian');
+    });
+
+    test('absorbs saveFirstPage write failures (best-effort) without failing HTTP 200 response',
+        () async {
+      final failingLocal = _MockLocalDataSource();
+      when(() => failingLocal.saveFirstPage(page1Model))
+          .thenThrow(Exception('Disk full'));
+      when(
+        () => remoteDataSource.fetchBreedsPage(page: 1, limit: 20),
+      ).thenAnswer((_) async => page1Model);
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: failingLocal,
+      );
+
+      final page = await repository.fetchBreedsPage(page: 1);
+      expect(page.items.single.breed, 'Abyssinian');
+      verify(() => failingLocal.saveFirstPage(page1Model)).called(1);
+    });
+
+    test('invalidateCache clears both local cache and in-memory index',
+        () async {
+      when(
+        () => remoteDataSource.fetchBreedsPage(page: 1, limit: 20),
+      ).thenAnswer((_) async => page1Model);
+      when(
+        () => remoteDataSource.fetchBreedsPage(page: 1, limit: 50),
+      ).thenAnswer(
+        (_) async => const BreedsPageModel(
+          currentPage: 1,
+          lastPage: 1,
+          total: 0,
+          data: [],
+        ),
+      );
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+      );
+
+      await repository.fetchBreedsPage(page: 1);
+      expect((await repository.findBreedByName('Abyssinian')).breed, 'Abyssinian');
+
+      await repository.invalidateCache();
+      expect(repository.getCachedFirstPage(), isNull);
+
+      // Must not resolve stale in-memory Abyssinian after invalidation.
+      await expectLater(
+        () => repository.findBreedByName('Abyssinian'),
+        throwsA(isA<NotFoundFailure>()),
+      );
+    });
+
+    test('forwards CancelToken to remote datasource and stops cancelled deep-link lookup',
+        () async {
+      final token = CancelToken();
+      when(
+        () => remoteDataSource.fetchBreedsPage(
+          page: 1,
+          limit: 20,
+          cancelToken: token,
+        ),
+      ).thenAnswer((_) async => page1Model);
+      when(
+        () => remoteDataSource.fetchRandomFact(cancelToken: token),
+      ).thenAnswer(
+        (_) async => const CatFactModel(fact: 'Cats purr.', length: 10),
+      );
+
+      final repository = BreedsRepositoryImpl(
+        remoteDataSource: remoteDataSource,
+        localDataSource: localDataSource,
+      );
+
+      await repository.fetchBreedsPage(page: 1, cancelToken: token);
+      final fact = await repository.fetchRandomFact(cancelToken: token);
+      expect(fact.fact, 'Cats purr.');
+
+      verify(
+        () => remoteDataSource.fetchBreedsPage(
+          page: 1,
+          limit: 20,
+          cancelToken: token,
+        ),
+      ).called(1);
+      verify(
+        () => remoteDataSource.fetchRandomFact(cancelToken: token),
+      ).called(1);
+
+      final cancelledToken = CancelToken()..cancel('Aborted');
+      await expectLater(
+        () => repository.findBreedByName(
+          'NotInMemory',
+          cancelToken: cancelledToken,
+        ),
+        throwsA(
+          isA<AppFailure>().having((f) => f.isCancellation, 'isCancellation', true),
         ),
       );
     });

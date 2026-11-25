@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../entities/breed.dart';
 import '../entities/breeds_page.dart';
 import '../entities/cached_breeds_result.dart';
@@ -15,14 +17,20 @@ abstract interface class BreedsRepository {
   Future<BreedsPage> fetchBreedsPage({
     required int page,
     int limit = defaultPageSize,
+    CancelToken? cancelToken,
   });
 
   /// Explicitly invalidates cached breeds (e.g., on forced Pull-to-Refresh).
   Future<void> invalidateCache();
 
   /// Resolves a breed by name from memory, local cache, or remote API (for Deep Links).
-  Future<Breed> findBreedByName(String name);
+  Future<Breed> findBreedByName(
+    String name, {
+    CancelToken? cancelToken,
+  });
 
   /// Fetches a random cat fact from `/fact`.
-  Future<CatFact> fetchRandomFact();
+  Future<CatFact> fetchRandomFact({
+    CancelToken? cancelToken,
+  });
 }

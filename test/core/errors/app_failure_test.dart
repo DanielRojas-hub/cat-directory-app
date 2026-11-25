@@ -136,7 +136,9 @@ void main() {
 
       expect(failure, isA<UnknownFailure>());
       expect(failure.isRetryable, isFalse);
+      expect(failure.isCancellation, isTrue);
       expect(failure.message, contains('cancelada'));
+      expect(const NetworkFailure().isCancellation, isFalse);
     });
 
     test('maps badCertificate and unknown (with or without SocketException) to NetworkFailure',

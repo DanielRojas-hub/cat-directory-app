@@ -91,8 +91,12 @@ void main() {
         .thenAnswer((_) => const Stream<bool>.empty());
     when(() => repository.getCachedFirstPage()).thenReturn(null);
     when(() => repository.invalidateCache()).thenAnswer((_) async {});
-    when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-        .thenAnswer(
+    when(
+      () => repository.fetchBreedsPage(
+        page: any(named: 'page'),
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer(
       (_) async => const BreedsPage(
         currentPage: 1,
         lastPage: 2,
@@ -100,9 +104,15 @@ void main() {
         items: [_abyssinian, _bengal, _longBreed],
       ),
     );
-    when(() => repository.findBreedByName(any()))
-        .thenAnswer((_) async => _abyssinian);
-    when(() => repository.fetchRandomFact()).thenAnswer(
+    when(
+      () => repository.findBreedByName(
+        any(),
+        cancelToken: any(named: 'cancelToken'),
+      ),
+    ).thenAnswer((_) async => _abyssinian);
+    when(
+      () => repository.fetchRandomFact(cancelToken: any(named: 'cancelToken')),
+    ).thenAnswer(
       (_) async => const CatFact(
         fact: 'Cats sleep 12-16 hours a day.',
         length: 29,
@@ -357,8 +367,12 @@ void main() {
           expect(find.text('No hay razas disponibles'), findsOneWidget);
 
           // 4. BreedDetailPage lookup error view in Landscape
-          when(() => repository.findBreedByName(any()))
-              .thenThrow(const NotFoundFailure(message: 'No encontrada'));
+          when(
+            () => repository.findBreedByName(
+              any(),
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenThrow(const NotFoundFailure(message: 'No encontrada'));
           final detailRouter = createAppRouter(
             initialLocation: AppRoutes.breedDetailPath('UnknownCat'),
             detailCubitFactory: () => BreedDetailCubit(repository: repository),
@@ -516,7 +530,12 @@ void main() {
       'displays _EmptyDirectoryView when API returns 200 OK with data: [] and reloads on tap',
       (tester) async {
         var calls = 0;
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer((_) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
           calls++;
           if (calls == 1) {
             return const BreedsPage(
@@ -569,7 +588,12 @@ void main() {
       '_EmptySearchView exposes loading spinner and pagination error feedback',
       (tester) async {
         final gate = Completer<void>();
-        when(() => repository.fetchBreedsPage(page: 2)).thenAnswer((_) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
           await gate.future;
           throw const NetworkFailure(message: 'Error de red temporal');
         });
@@ -722,8 +746,12 @@ void main() {
       'AppBar updates from raw route slug (/breed/abyssinian) to canonical breed name (Abyssinian)',
       (tester) async {
         final breedCompleter = Completer<Breed>();
-        when(() => repository.findBreedByName('abyssinian'))
-            .thenAnswer((_) => breedCompleter.future);
+        when(
+          () => repository.findBreedByName(
+            'abyssinian',
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) => breedCompleter.future);
 
         final router = createAppRouter(
           initialLocation: '/breed/abyssinian',

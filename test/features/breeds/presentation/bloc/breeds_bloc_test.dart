@@ -13,6 +13,7 @@ import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_bloc.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_event.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_state.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -41,6 +42,13 @@ void main() {
     origin: 'Hybrid',
     coat: 'Short',
     pattern: 'Spotted',
+  );
+  const breed4 = Breed(
+    breed: 'Siamese',
+    country: 'Thailand',
+    origin: 'Natural',
+    coat: 'Short',
+    pattern: 'Colorpoint',
   );
 
   final fixedNow = DateTime.utc(2026, 11, 24, 18);
@@ -80,7 +88,12 @@ void main() {
             isExpired: true,
           ),
         );
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => const BreedsPage(
             currentPage: 1,
             lastPage: 3,
@@ -140,12 +153,17 @@ void main() {
             .having((s) => s.isOnline, 'isOnline', true),
       ],
       verify: (_) {
-        verifyNever(() => repository.fetchBreedsPage(page: any(named: 'page')));
+        verifyNever(
+          () => repository.fetchBreedsPage(
+            page: any(named: 'page'),
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        );
       },
     );
 
     blocTest<BreedsBloc, BreedsState>(
-      'renders cached breeds instantly offline without calling remote API',
+      'renders cached breeds synchronously before resolving offline status without calling remote API',
       setUp: () {
         when(() => connectivity.hasConnection).thenAnswer((_) async => false);
         when(() => repository.getCachedFirstPage()).thenReturn(
@@ -171,19 +189,77 @@ void main() {
         isA<BreedsState>()
             .having((s) => s.status, 'status', BreedsStatus.loaded)
             .having((s) => s.breeds, 'breeds', [breed1, breed2])
+            .having((s) => s.errorMessage, 'errorMessage', isNull),
+        isA<BreedsState>()
+            .having((s) => s.status, 'status', BreedsStatus.loaded)
+            .having((s) => s.breeds, 'breeds', [breed1, breed2])
             .having((s) => s.isFromCache, 'isFromCache', true)
             .having((s) => s.isOnline, 'isOnline', false)
             .having((s) => s.errorMessage, 'errorMessage', isNull),
       ],
       verify: (_) {
-        verifyNever(() => repository.fetchBreedsPage(page: any(named: 'page')));
+        verifyNever(
+          () => repository.fetchBreedsPage(
+            page: any(named: 'page'),
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'emits cached first page synchronously before connectivityMonitor.hasConnection resolves (M4)',
+      () async {
+        final hasConnectionCompleter = Completer<bool>();
+        when(() => connectivity.hasConnection)
+            .thenAnswer((_) => hasConnectionCompleter.future);
+        when(() => repository.getCachedFirstPage()).thenReturn(
+          CachedBreedsResult(
+            page: const BreedsPage(
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              items: [breed1, breed2],
+            ),
+            cachedAt: fixedNow.subtract(const Duration(minutes: 1)),
+            isExpired: false,
+          ),
+        );
+
+        final bloc = BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+          clock: () => fixedNow,
+        );
+        addTearDown(bloc.close);
+
+        final seenStatuses = <BreedsStatus>[];
+        final sub = bloc.stream.listen((s) => seenStatuses.add(s.status));
+        addTearDown(sub.cancel);
+
+        bloc.add(const BreedsStarted());
+        await bloc.stream.firstWhere((s) => s.status == BreedsStatus.loaded);
+
+        expect(hasConnectionCompleter.isCompleted, isFalse);
+        expect(bloc.state.status, BreedsStatus.loaded);
+        expect(bloc.state.breeds, [breed1, breed2]);
+        expect(seenStatuses, isNot(contains(BreedsStatus.loading)));
+
+        hasConnectionCompleter.complete(false);
+        await bloc.stream.firstWhere((s) => !s.isOnline);
+        expect(bloc.state.isFromCache, isTrue);
       },
     );
 
     blocTest<BreedsBloc, BreedsState>(
       'drops concurrent pagination triggers via droppable() transformer',
       setUp: () {
-        when(() => repository.fetchBreedsPage(page: 2)).thenAnswer((_) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
           await Future<void>.delayed(const Duration(milliseconds: 30));
           return const BreedsPage(
             currentPage: 2,
@@ -220,15 +296,24 @@ void main() {
             .having((s) => s.breeds, 'breeds', [breed1, breed2, breed3]),
       ],
       verify: (_) {
-        verify(() => repository.fetchBreedsPage(page: 2)).called(1);
+        verify(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(1);
       },
     );
 
     blocTest<BreedsBloc, BreedsState>(
       'preserves loaded breeds when intermediate page fails',
       setUp: () {
-        when(() => repository.fetchBreedsPage(page: 2))
-            .thenThrow(const NetworkFailure());
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenThrow(const NetworkFailure());
       },
       build: () => BreedsBloc(
         repository: repository,
@@ -285,7 +370,12 @@ void main() {
     blocTest<BreedsBloc, BreedsState>(
       'auto-revalidates cached list when connectivity transitions offline -> online',
       setUp: () {
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => const BreedsPage(
             currentPage: 1,
             lastPage: 2,
@@ -314,7 +404,12 @@ void main() {
         isA<BreedsState>()
             .having((s) => s.isOnline, 'isOnline', true)
             .having((s) => s.isRevalidating, 'isRevalidating', true)
-            .having((s) => s.notice?.kind, 'notice kind', BreedsNoticeKind.info),
+            .having((s) => s.notice?.kind, 'notice kind', BreedsNoticeKind.info)
+            .having(
+              (s) => s.notice?.message,
+              'notice message',
+              'Conexión restaurada. Sincronizando directorio...',
+            ),
         isA<BreedsState>()
             .having((s) => s.isFromCache, 'isFromCache', false)
             .having((s) => s.isRevalidating, 'isRevalidating', false)
@@ -325,7 +420,12 @@ void main() {
     blocTest<BreedsBloc, BreedsState>(
       'clears isFromCache when next page loads successfully from network',
       setUp: () {
-        when(() => repository.fetchBreedsPage(page: 2)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => const BreedsPage(
             currentPage: 2,
             lastPage: 3,
@@ -359,9 +459,14 @@ void main() {
     );
 
     blocTest<BreedsBloc, BreedsState>(
-      'connectivity recovery protects deeper pagination when currentPage > 1',
+      'connectivity recovery updates page 1 slice while preserving deeper pagination when currentPage > 1',
       setUp: () {
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => const BreedsPage(
             currentPage: 1,
             lastPage: 3,
@@ -398,11 +503,72 @@ void main() {
       ],
     );
 
+    test(
+      'revalidation with currentPage > 1 merges updated page 1 slice and metadata while keeping page 2 items (M8)',
+      () async {
+        const updatedBreed1 = Breed(
+          breed: 'Abyssinian',
+          country: 'Updated Ethiopia',
+          origin: 'Natural/Standard',
+          coat: 'Short',
+          pattern: 'Ticked',
+        );
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 1,
+            lastPage: 4,
+            total: 80,
+            items: [updatedBreed1, breed4],
+          ),
+        );
+
+        final bloc = BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+          clock: () => fixedNow,
+        );
+        addTearDown(bloc.close);
+
+        bloc.emit(
+          const BreedsState(
+            status: BreedsStatus.loaded,
+            breeds: [breed1, breed2, breed3],
+            currentPage: 2,
+            lastPage: 3,
+            total: 60,
+            isFromCache: true,
+            isOnline: false,
+          ),
+        );
+
+        final settled = bloc.stream.firstWhere(
+          (s) => !s.isRevalidating && !s.isFromCache,
+        );
+        connectivityController.add(true);
+        await settled;
+
+        expect(bloc.state.currentPage, 2);
+        expect(bloc.state.lastPage, 4);
+        expect(bloc.state.total, 80);
+        expect(bloc.state.breeds, [updatedBreed1, breed4, breed2, breed3]);
+      },
+    );
+
     group('BreedsRefreshed', () {
       test(
         'reloads page 1 atomically without invalidating cache first and completes Completer',
         () async {
-          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
             (_) async => const BreedsPage(
               currentPage: 1,
               lastPage: 2,
@@ -472,16 +638,29 @@ void main() {
           expect(bloc.state.isRevalidating, isFalse);
           expect(bloc.state.breeds, [breed1]);
           expect(bloc.state.notice?.kind, BreedsNoticeKind.warning);
+          expect(
+            bloc.state.notice?.message,
+            'Sin conexión a internet. Mostrando los datos guardados.',
+          );
           verifyNever(() => repository.invalidateCache());
-          verifyNever(() => repository.fetchBreedsPage(page: any(named: 'page')));
+          verifyNever(
+            () => repository.fetchBreedsPage(
+              page: any(named: 'page'),
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          );
         },
       );
 
       test(
         'preserves existing breeds and offline cache when remote refresh fails',
         () async {
-          when(() => repository.fetchBreedsPage(page: 1))
-              .thenThrow(const NetworkFailure());
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenThrow(const NetworkFailure());
 
           final bloc = BreedsBloc(
             repository: repository,
@@ -513,11 +692,15 @@ void main() {
       );
 
       test(
-        'completes discarded Completer immediately when a refresh is already running',
+        'shares completion across concurrent BreedsRefreshed calls without closing RefreshIndicator early (M8)',
         () async {
           final page1Completer = Completer<BreedsPage>();
-          when(() => repository.fetchBreedsPage(page: 1))
-              .thenAnswer((_) => page1Completer.future);
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer((_) => page1Completer.future);
 
           final bloc = BreedsBloc(
             repository: repository,
@@ -542,9 +725,12 @@ void main() {
             ..add(BreedsRefreshed(completer: firstRefresh))
             ..add(BreedsRefreshed(completer: secondRefresh));
 
-          await secondRefresh.future.timeout(const Duration(seconds: 1));
+          await bloc.stream.firstWhere((s) => s.isRevalidating);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          // Neither completer should finish until the single in-flight refresh completes.
           expect(firstRefresh.isCompleted, isFalse);
-          expect(secondRefresh.isCompleted, isTrue);
+          expect(secondRefresh.isCompleted, isFalse);
 
           page1Completer.complete(
             const BreedsPage(
@@ -554,9 +740,17 @@ void main() {
               items: [breed1, breed2],
             ),
           );
-          await firstRefresh.future.timeout(const Duration(seconds: 1));
+          await Future.wait([
+            firstRefresh.future.timeout(const Duration(seconds: 1)),
+            secondRefresh.future.timeout(const Duration(seconds: 1)),
+          ]);
 
-          verify(() => repository.fetchBreedsPage(page: 1)).called(1);
+          verify(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).called(1);
           expect(bloc.state.breeds, [breed1, breed2]);
         },
       );
@@ -597,7 +791,10 @@ void main() {
         expect: () => <BreedsState>[],
         verify: (_) {
           verifyNever(
-            () => repository.fetchBreedsPage(page: any(named: 'page')),
+            () => repository.fetchBreedsPage(
+              page: any(named: 'page'),
+              cancelToken: any(named: 'cancelToken'),
+            ),
           );
         },
       );
@@ -617,7 +814,12 @@ void main() {
               isExpired: false,
             ),
           );
-          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
             (_) async => const BreedsPage(
               currentPage: 1,
               lastPage: 2,
@@ -668,7 +870,12 @@ void main() {
               isExpired: true,
             ),
           );
-          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
             (_) async => const BreedsPage(
               currentPage: 1,
               lastPage: 3,
@@ -704,7 +911,7 @@ void main() {
       );
     });
 
-    group('Race condition prevention', () {
+    group('Race condition prevention & CancelToken', () {
       test(
         'in-flight SWR revalidation does not overwrite page 2 loaded while revalidating',
         () async {
@@ -721,9 +928,18 @@ void main() {
               isExpired: true,
             ),
           );
-          when(() => repository.fetchBreedsPage(page: 1))
-              .thenAnswer((_) => swrCompleter.future);
-          when(() => repository.fetchBreedsPage(page: 2)).thenAnswer(
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer((_) => swrCompleter.future);
+          when(
+            () => repository.fetchBreedsPage(
+              page: 2,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
             (_) async => const BreedsPage(
               currentPage: 2,
               lastPage: 3,
@@ -771,9 +987,23 @@ void main() {
         'stale page 3 response is discarded after Pull-to-Refresh resets to page 1',
         () async {
           final page3Completer = Completer<BreedsPage>();
-          when(() => repository.fetchBreedsPage(page: 3))
-              .thenAnswer((_) => page3Completer.future);
-          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+          CancelToken? capturedPage3Token;
+          when(
+            () => repository.fetchBreedsPage(
+              page: 3,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer((invocation) {
+            capturedPage3Token =
+                invocation.namedArguments[#cancelToken] as CancelToken?;
+            return page3Completer.future;
+          });
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
             (_) async => const BreedsPage(
               currentPage: 1,
               lastPage: 3,
@@ -806,6 +1036,7 @@ void main() {
           bloc.add(BreedsRefreshed(completer: refreshCompleter));
           await refreshCompleter.future;
 
+          expect(capturedPage3Token?.isCancelled, isTrue);
           expect(bloc.state.currentPage, 1);
           expect(bloc.state.breeds, [breed1]);
           expect(bloc.state.isLoadingMore, isFalse);
@@ -823,6 +1054,256 @@ void main() {
 
           expect(bloc.state.currentPage, 1);
           expect(bloc.state.breeds, [breed1]);
+        },
+      );
+
+      test(
+        'BreedsNextPageRequested succeeds immediately after refresh cancels in-flight page 2 (A3)',
+        () async {
+          final stuckPage2Completer = Completer<BreedsPage>();
+          final page2Tokens = <CancelToken?>[];
+          var page2Calls = 0;
+
+          when(
+            () => repository.fetchBreedsPage(
+              page: 2,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer((invocation) {
+            page2Calls++;
+            page2Tokens.add(
+              invocation.namedArguments[#cancelToken] as CancelToken?,
+            );
+            if (page2Calls == 1) {
+              return stuckPage2Completer.future;
+            }
+            return Future<BreedsPage>.value(
+              const BreedsPage(
+                currentPage: 2,
+                lastPage: 3,
+                total: 60,
+                items: [breed3],
+              ),
+            );
+          });
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+              items: [breed4],
+            ),
+          );
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+            clock: () => fixedNow,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1, breed2],
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+            ),
+          );
+
+          // Start stuck page 2 request.
+          bloc.add(const BreedsNextPageRequested());
+          await bloc.stream.firstWhere((s) => s.isLoadingMore);
+
+          // Pull-to-refresh cancels stuck page 2 and reloads page 1.
+          final refreshCompleter = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: refreshCompleter));
+          await refreshCompleter.future;
+
+          expect(page2Tokens.first?.isCancelled, isTrue);
+          expect(bloc.state.breeds, [breed4]);
+          expect(bloc.state.notice, isNull);
+
+          // Immediately request page 2 again while old stuck future never resolved.
+          final page2Loaded = bloc.stream
+              .firstWhere((s) => s.currentPage == 2 && !s.isLoadingMore)
+              .timeout(const Duration(seconds: 1));
+          bloc.add(const BreedsNextPageRequested());
+          await page2Loaded;
+
+          expect(page2Calls, 2);
+          expect(bloc.state.currentPage, 2);
+          expect(bloc.state.breeds, [breed4, breed3]);
+        },
+      );
+
+      test(
+        'closing BreedsBloc cancels active pagination and first-page CancelTokens',
+        () async {
+          final stuckPage2 = Completer<BreedsPage>();
+          CancelToken? paginationToken;
+
+          when(
+            () => repository.fetchBreedsPage(
+              page: 2,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenAnswer((invocation) {
+            paginationToken =
+                invocation.namedArguments[#cancelToken] as CancelToken?;
+            return stuckPage2.future;
+          });
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+            ),
+          );
+
+          bloc.add(const BreedsNextPageRequested());
+          await bloc.stream.firstWhere((s) => s.isLoadingMore);
+          expect(paginationToken?.isCancelled, isFalse);
+
+          await bloc.close();
+          expect(paginationToken?.isCancelled, isTrue);
+        },
+      );
+    });
+
+    group('Offline & reconnection messaging accuracy (M6)', () {
+      test(
+        'BreedsRefreshed while offline with empty breeds does not claim saved data',
+        () async {
+          when(() => connectivity.hasConnection).thenAnswer((_) async => false);
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.failure,
+              breeds: [],
+              isOnline: false,
+              errorMessage: 'Sin conexión a internet.',
+            ),
+          );
+
+          final completer = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: completer));
+          await completer.future;
+
+          expect(bloc.state.notice?.kind, BreedsNoticeKind.warning);
+          expect(
+            bloc.state.notice?.message.toLowerCase(),
+            isNot(contains('datos guardados')),
+          );
+          expect(bloc.state.notice?.message, const NetworkFailure().message);
+        },
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'cold-start offline connectivity event emits no misleading connection-lost notice',
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+        ),
+        act: (_) => connectivityController.add(false),
+        wait: const Duration(milliseconds: 20),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.isOnline, 'isOnline', false)
+              .having((s) => s.notice, 'notice', isNull),
+        ],
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'reconnection with fresh loaded data emits Conexión restaurada without Sincronizando',
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+        ),
+        seed: () => const BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [breed1, breed2],
+          currentPage: 1,
+          lastPage: 2,
+          total: 40,
+          isFromCache: false,
+          isOnline: false,
+        ),
+        act: (_) => connectivityController.add(true),
+        wait: const Duration(milliseconds: 20),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.isOnline, 'isOnline', true)
+              .having((s) => s.isRevalidating, 'isRevalidating', false)
+              .having((s) => s.notice?.kind, 'kind', BreedsNoticeKind.info)
+              .having(
+                (s) => s.notice?.message,
+                'message',
+                'Conexión restaurada.',
+              ),
+        ],
+        verify: (_) {
+          verifyNever(
+            () => repository.fetchBreedsPage(
+              page: any(named: 'page'),
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          );
+        },
+      );
+
+      test(
+        'reconnection does not auto-retry non-retryable AppFailure (B2 isRetryable integration)',
+        () async {
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenThrow(const NotFoundFailure());
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.add(const BreedsStarted());
+          await bloc.stream.firstWhere((s) => s.status == BreedsStatus.failure);
+
+          connectivityController.add(false);
+          await bloc.stream.firstWhere((s) => !s.isOnline);
+
+          connectivityController.add(true);
+          await bloc.stream.firstWhere((s) => s.isOnline);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+
+          expect(bloc.state.notice?.message, 'Conexión restaurada.');
+          verify(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).called(1);
         },
       );
     });
@@ -850,8 +1331,12 @@ void main() {
       blocTest<BreedsBloc, BreedsState>(
         'exits loading state cleanly when fetchBreedsPage throws non-AppFailure',
         setUp: () {
-          when(() => repository.fetchBreedsPage(page: 1))
-              .thenThrow(Exception('SharedPreferences write failed'));
+          when(
+            () => repository.fetchBreedsPage(
+              page: 1,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenThrow(Exception('SharedPreferences write failed'));
         },
         build: () => BreedsBloc(
           repository: repository,
@@ -903,8 +1388,12 @@ void main() {
       blocTest<BreedsBloc, BreedsState>(
         'resets isLoadingMore on unexpected error in BreedsNextPageRequested',
         setUp: () {
-          when(() => repository.fetchBreedsPage(page: 2))
-              .thenThrow(StateError('unexpected pagination error'));
+          when(
+            () => repository.fetchBreedsPage(
+              page: 2,
+              cancelToken: any(named: 'cancelToken'),
+            ),
+          ).thenThrow(StateError('unexpected pagination error'));
         },
         build: () => BreedsBloc(
           repository: repository,
@@ -949,8 +1438,11 @@ void main() {
     blocTest<BreedDetailCubit, BreedDetailState>(
       'keeps breed details loaded even when independent /fact endpoint fails',
       setUp: () {
-        when(() => repository.fetchRandomFact())
-            .thenThrow(const NetworkFailure());
+        when(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenThrow(const NetworkFailure());
       },
       build: () => BreedDetailCubit(repository: repository),
       act: (cubit) => cubit.load(
@@ -968,10 +1460,17 @@ void main() {
     blocTest<BreedDetailCubit, BreedDetailState>(
       'resolves breed on cold start (initialBreed: null) alongside random fact',
       setUp: () {
-        when(() => repository.findBreedByName(breed3.breed))
-            .thenAnswer((_) async => breed3);
-        when(() => repository.fetchRandomFact())
-            .thenAnswer((_) async => sampleFact);
+        when(
+          () => repository.findBreedByName(
+            breed3.breed,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async => breed3);
+        when(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async => sampleFact);
       },
       build: () => BreedDetailCubit(repository: repository),
       act: (cubit) => cubit.load(breedName: breed3.breed),
@@ -993,19 +1492,36 @@ void main() {
             .having((s) => s.fact, 'fact', sampleFact),
       ],
       verify: (_) {
-        verify(() => repository.findBreedByName(breed3.breed)).called(1);
-        verify(() => repository.fetchRandomFact()).called(1);
+        verify(
+          () => repository.findBreedByName(
+            breed3.breed,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(1);
+        verify(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(1);
       },
     );
 
     blocTest<BreedDetailCubit, BreedDetailState>(
       'emits failure state on cold start when findBreedByName throws AppFailure',
       setUp: () {
-        when(() => repository.findBreedByName('UnknownBreed')).thenThrow(
+        when(
+          () => repository.findBreedByName(
+            'UnknownBreed',
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenThrow(
           const NotFoundFailure(message: 'Raza no encontrada.'),
         );
-        when(() => repository.fetchRandomFact())
-            .thenAnswer((_) async => sampleFact);
+        when(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async => sampleFact);
       },
       build: () => BreedDetailCubit(repository: repository),
       act: (cubit) => cubit.load(breedName: 'UnknownBreed'),
@@ -1020,10 +1536,17 @@ void main() {
     blocTest<BreedDetailCubit, BreedDetailState>(
       'defensively catches non-AppFailure Object errors in breed lookup and fact loading',
       setUp: () {
-        when(() => repository.findBreedByName(breed1.breed))
-            .thenThrow(StateError('unexpected lookup failure'));
-        when(() => repository.fetchRandomFact())
-            .thenThrow(const FormatException('corrupt fact payload'));
+        when(
+          () => repository.findBreedByName(
+            breed1.breed,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenThrow(StateError('unexpected lookup failure'));
+        when(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenThrow(const FormatException('corrupt fact payload'));
       },
       build: () => BreedDetailCubit(repository: repository),
       act: (cubit) => cubit.load(breedName: breed1.breed),
@@ -1045,16 +1568,23 @@ void main() {
       'retryBreedLookup recovers from cold-start error and clears error message',
       setUp: () {
         var calls = 0;
-        when(() => repository.findBreedByName(breed3.breed))
-            .thenAnswer((_) async {
+        when(
+          () => repository.findBreedByName(
+            breed3.breed,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
           calls++;
           if (calls == 1) {
             throw const NetworkFailure();
           }
           return breed3;
         });
-        when(() => repository.fetchRandomFact())
-            .thenAnswer((_) async => sampleFact);
+        when(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async => sampleFact);
       },
       build: () => BreedDetailCubit(repository: repository),
       act: (cubit) async {
@@ -1065,8 +1595,53 @@ void main() {
         expect(cubit.state.breedStatus, BreedDetailStatus.loaded);
         expect(cubit.state.breed, breed3);
         expect(cubit.state.breedErrorMessage, isNull);
-        verify(() => repository.findBreedByName(breed3.breed)).called(2);
+        verify(
+          () => repository.findBreedByName(
+            breed3.breed,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(2);
       },
     );
+
+    test('close() cancels in-flight /fact and deep-link breed lookup CancelTokens (B4)',
+        () async {
+      final breedCompleter = Completer<Breed>();
+      final factCompleter = Completer<CatFact>();
+      CancelToken? lookupToken;
+      CancelToken? factToken;
+
+      when(
+        () => repository.findBreedByName(
+          breed3.breed,
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((invocation) {
+        lookupToken = invocation.namedArguments[#cancelToken] as CancelToken?;
+        return breedCompleter.future;
+      });
+      when(
+        () => repository.fetchRandomFact(
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((invocation) {
+        factToken = invocation.namedArguments[#cancelToken] as CancelToken?;
+        return factCompleter.future;
+      });
+
+      final cubit = BreedDetailCubit(repository: repository);
+      unawaited(cubit.load(breedName: breed3.breed));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(lookupToken, isNotNull);
+      expect(factToken, isNotNull);
+      expect(lookupToken!.isCancelled, isFalse);
+      expect(factToken!.isCancelled, isFalse);
+
+      await cubit.close();
+
+      expect(lookupToken!.isCancelled, isTrue);
+      expect(factToken!.isCancelled, isTrue);
+    });
   });
 }

@@ -75,8 +75,12 @@ void main() {
         (_) => const Stream<bool>.empty(),
       );
       when(() => repository.getCachedFirstPage()).thenReturn(null);
-      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-          .thenAnswer(
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer(
         (_) async => const BreedsPage(
           currentPage: 1,
           lastPage: 2,
@@ -84,9 +88,15 @@ void main() {
           items: [sampleBreed],
         ),
       );
-      when(() => repository.findBreedByName('Abyssinian'))
-          .thenAnswer((_) async => sampleBreed);
-      when(() => repository.fetchRandomFact()).thenAnswer(
+      when(
+        () => repository.findBreedByName(
+          'Abyssinian',
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((_) async => sampleBreed);
+      when(
+        () => repository.fetchRandomFact(cancelToken: any(named: 'cancelToken')),
+      ).thenAnswer(
         (_) async =>
             const CatFact(fact: 'Cats have 32 muscles in each ear.', length: 33),
       );
@@ -147,8 +157,12 @@ void main() {
     testWidgets(
         'Search field exposes single textField node and independent clear button via SemanticsAction.tap',
         (tester) async {
-      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-          .thenAnswer(
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer(
         (_) async => const BreedsPage(
           currentPage: 1,
           lastPage: 1,
@@ -277,7 +291,9 @@ void main() {
         'BreedDetailPage satisfies accessibility guidelines and CatFactCard refresh has single button node',
         (tester) async {
       var factCallCount = 0;
-      when(() => repository.fetchRandomFact()).thenAnswer((_) async {
+      when(
+        () => repository.fetchRandomFact(cancelToken: any(named: 'cancelToken')),
+      ).thenAnswer((_) async {
         factCallCount++;
         if (factCallCount == 1) {
           return const CatFact(
@@ -350,8 +366,12 @@ void main() {
     testWidgets('Loading skeleton exposes live-region Semantics label',
         (tester) async {
       final completer = Completer<BreedsPage>();
-      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-          .thenAnswer((_) => completer.future);
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((_) => completer.future);
 
       final handle = tester.ensureSemantics();
       final router = createAppRouter(
@@ -387,8 +407,12 @@ void main() {
 
     testWidgets('Error state exposes accessible retry action and guidelines',
         (tester) async {
-      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-          .thenThrow(const NetworkFailure());
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenThrow(const NetworkFailure());
 
       final handle = tester.ensureSemantics();
       final router = createAppRouter(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/errors/app_failure.dart';
@@ -14,6 +15,14 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
       : super(const BreedDetailState());
 
   final BreedsRepository _repository;
+  CancelToken? _breedLookupCancelToken;
+  CancelToken? _factCancelToken;
+
+  void _cancelToken(CancelToken? token, String reason) {
+    if (token != null && !token.isCancelled) {
+      token.cancel(reason);
+    }
+  }
 
   /// Loads breed details (instantly when [initialBreed] is provided, or via
   /// repository lookup for deep-linked routes) alongside an independent `/fact` call.
@@ -21,6 +30,7 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
     required String breedName,
     Breed? initialBreed,
   }) async {
+    if (isClosed) return;
     unawaited(loadRandomFact());
 
     if (initialBreed != null) {
@@ -43,6 +53,11 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
   }
 
   Future<void> _resolveBreedByName(String breedName) async {
+    if (isClosed) return;
+    _cancelToken(_breedLookupCancelToken, 'Superseded by new breed lookup');
+    final cancelToken = CancelToken();
+    _breedLookupCancelToken = cancelToken;
+
     emit(
       state.copyWith(
         breedStatus: BreedDetailStatus.loading,
@@ -51,8 +66,11 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
     );
 
     try {
-      final breed = await _repository.findBreedByName(breedName);
-      if (isClosed) return;
+      final breed = await _repository.findBreedByName(
+        breedName,
+        cancelToken: cancelToken,
+      );
+      if (isClosed || cancelToken.isCancelled) return;
       emit(
         state.copyWith(
           breedStatus: BreedDetailStatus.loaded,
@@ -61,7 +79,7 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (isClosed) return;
+      if (isClosed || cancelToken.isCancelled || failure.isCancellation) return;
       emit(
         state.copyWith(
           breedStatus: BreedDetailStatus.failure,
@@ -69,21 +87,28 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
         ),
       );
     } on Object {
-      if (isClosed) return;
+      if (isClosed || cancelToken.isCancelled) return;
       emit(
         state.copyWith(
           breedStatus: BreedDetailStatus.failure,
           breedErrorMessage: const UnknownFailure().message,
         ),
       );
+    } finally {
+      if (identical(_breedLookupCancelToken, cancelToken)) {
+        _breedLookupCancelToken = null;
+      }
     }
   }
 
   /// Fetches a random cat fact independently from the breed details state.
   Future<void> loadRandomFact() async {
-    if (state.factStatus == CatFactStatus.loading) {
+    if (isClosed || state.factStatus == CatFactStatus.loading) {
       return;
     }
+
+    final cancelToken = CancelToken();
+    _factCancelToken = cancelToken;
 
     emit(
       state.copyWith(
@@ -93,8 +118,8 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
     );
 
     try {
-      final fact = await _repository.fetchRandomFact();
-      if (isClosed) return;
+      final fact = await _repository.fetchRandomFact(cancelToken: cancelToken);
+      if (isClosed || cancelToken.isCancelled) return;
       emit(
         state.copyWith(
           factStatus: CatFactStatus.loaded,
@@ -103,7 +128,7 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (isClosed) return;
+      if (isClosed || cancelToken.isCancelled || failure.isCancellation) return;
       emit(
         state.copyWith(
           factStatus: CatFactStatus.failure,
@@ -111,13 +136,26 @@ final class BreedDetailCubit extends Cubit<BreedDetailState> {
         ),
       );
     } on Object {
-      if (isClosed) return;
+      if (isClosed || cancelToken.isCancelled) return;
       emit(
         state.copyWith(
           factStatus: CatFactStatus.failure,
           factErrorMessage: const UnknownFailure().message,
         ),
       );
+    } finally {
+      if (identical(_factCancelToken, cancelToken)) {
+        _factCancelToken = null;
+      }
     }
+  }
+
+  @override
+  Future<void> close() {
+    _cancelToken(_breedLookupCancelToken, 'BreedDetailCubit closed');
+    _breedLookupCancelToken = null;
+    _cancelToken(_factCancelToken, 'BreedDetailCubit closed');
+    _factCancelToken = null;
+    return super.close();
   }
 }

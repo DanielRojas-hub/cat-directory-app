@@ -125,7 +125,12 @@ void main() {
           }
         });
 
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer((_) {
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) {
           callCount++;
           if (callCount == 1) {
             return Future<BreedsPage>.value(
@@ -224,7 +229,12 @@ void main() {
       'local search filters without triggering remote pagination on scroll',
       (tester) async {
         final page1Breeds = _generateBreeds(15);
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => BreedsPage(
             currentPage: 1,
             lastPage: 3,
@@ -260,7 +270,12 @@ void main() {
         await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
         await tester.pumpAndSettle();
 
-        verifyNever(() => repository.fetchBreedsPage(page: 2));
+        verifyNever(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        );
 
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -273,7 +288,12 @@ void main() {
         final page1Breeds = _generateBreeds(15);
         final page2Breeds = _generateBreeds(5, prefix: 'Page2');
 
-        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
           (_) async => BreedsPage(
             currentPage: 1,
             lastPage: 3,
@@ -284,7 +304,12 @@ void main() {
 
         var page2Calls = 0;
         var shouldFailPage2 = true;
-        when(() => repository.fetchBreedsPage(page: 2)).thenAnswer((_) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
           page2Calls++;
           if (shouldFailPage2) {
             throw const NetworkFailure();
@@ -403,7 +428,11 @@ void main() {
 
         var failRefresh = false;
         when(
-          () => remoteDataSource.fetchBreedsPage(page: 1, limit: 20),
+          () => remoteDataSource.fetchBreedsPage(
+            page: 1,
+            limit: 20,
+            cancelToken: any(named: 'cancelToken'),
+          ),
         ).thenAnswer((_) async {
           if (failRefresh) {
             throw const NetworkFailure();

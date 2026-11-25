@@ -50,8 +50,12 @@ void main() {
         (_) => const Stream<bool>.empty(),
       );
       when(() => repository.getCachedFirstPage()).thenReturn(null);
-      when(() => repository.fetchBreedsPage(page: any(named: 'page')))
-          .thenAnswer((invocation) async {
+      when(
+        () => repository.fetchBreedsPage(
+          page: any(named: 'page'),
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer((invocation) async {
         final page = invocation.namedArguments[#page] as int;
         final start = (page - 1) * pageSize;
         final end = (start + pageSize).clamp(0, totalBreeds);
@@ -62,7 +66,11 @@ void main() {
           items: allBreeds.sublist(start, end),
         );
       });
-      when(() => repository.fetchRandomFact()).thenAnswer(
+      when(
+        () => repository.fetchRandomFact(
+          cancelToken: any(named: 'cancelToken'),
+        ),
+      ).thenAnswer(
         (_) async => const CatFact(
           fact: 'A group of cats is called a clowder.',
           length: 36,
