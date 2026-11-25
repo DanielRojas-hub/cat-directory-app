@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
@@ -35,9 +37,18 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
+    final bloc = context.read<BreedsBloc>();
+    final state = bloc.state;
+    if (state.status != BreedsStatus.loaded ||
+        state.isSearching ||
+        state.paginationErrorMessage != null ||
+        !state.hasMore ||
+        state.isLoadingMore) {
+      return;
+    }
     final position = _scrollController.position;
     if (position.pixels >= position.maxScrollExtent - _prefetchThresholdPx) {
-      context.read<BreedsBloc>().add(const BreedsNextPageRequested());
+      bloc.add(const BreedsNextPageRequested());
     }
   }
 
@@ -94,11 +105,10 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
   Future<void> _onRefresh() async {
     final bloc = context.read<BreedsBloc>();
-    bloc.add(const BreedsRefreshed());
-    // Wait until revalidation completes or notice is emitted so RefreshIndicator closes smoothly.
-    await bloc.stream.firstWhere(
-      (s) => !s.isRevalidating,
-    );
+    if (bloc.isClosed) return;
+    final completer = Completer<void>();
+    bloc.add(BreedsRefreshed(completer: completer));
+    await completer.future;
   }
 
   @override

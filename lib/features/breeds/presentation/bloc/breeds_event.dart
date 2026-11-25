@@ -1,3 +1,5 @@
+import 'dart:async';
+
 sealed class BreedsEvent {
   const BreedsEvent();
 }
@@ -7,9 +9,11 @@ final class BreedsStarted extends BreedsEvent {
   const BreedsStarted();
 }
 
-/// Pull-to-refresh action that invalidates local cache and reloads from page 1.
+/// Pull-to-refresh action that reloads page 1 and preserves local cache on failure.
 final class BreedsRefreshed extends BreedsEvent {
-  const BreedsRefreshed();
+  const BreedsRefreshed({this.completer});
+
+  final Completer<void>? completer;
 }
 
 /// Infinite scroll trigger requesting the next page with concurrency control.

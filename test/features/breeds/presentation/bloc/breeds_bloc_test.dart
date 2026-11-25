@@ -65,7 +65,7 @@ void main() {
     });
 
     blocTest<BreedsBloc, BreedsState>(
-      'emits cached page immediately then revalidates from network (SWR)',
+      'emits expired cached page immediately then revalidates from network (SWR)',
       setUp: () {
         when(() => repository.getCachedFirstPage()).thenReturn(
           CachedBreedsResult(
@@ -75,8 +75,8 @@ void main() {
               total: 60,
               items: [breed1],
             ),
-            cachedAt: fixedNow.subtract(const Duration(minutes: 4)),
-            isExpired: false,
+            cachedAt: fixedNow.subtract(const Duration(minutes: 11)),
+            isExpired: true,
           ),
         );
         when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
@@ -106,6 +106,41 @@ void main() {
             .having((s) => s.isFromCache, 'isFromCache', false)
             .having((s) => s.isRevalidating, 'isRevalidating', false),
       ],
+    );
+
+    blocTest<BreedsBloc, BreedsState>(
+      'uses fresh cache (< 10 min) online without redundant revalidation and clears stale banner',
+      setUp: () {
+        when(() => repository.getCachedFirstPage()).thenReturn(
+          CachedBreedsResult(
+            page: const BreedsPage(
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+              items: [breed1, breed2],
+            ),
+            cachedAt: fixedNow.subtract(const Duration(minutes: 4)),
+            isExpired: false,
+          ),
+        );
+      },
+      build: () => BreedsBloc(
+        repository: repository,
+        connectivityMonitor: connectivity,
+        clock: () => fixedNow,
+      ),
+      act: (bloc) => bloc.add(const BreedsStarted()),
+      expect: () => [
+        isA<BreedsState>()
+            .having((s) => s.status, 'status', BreedsStatus.loaded)
+            .having((s) => s.breeds, 'breeds', [breed1, breed2])
+            .having((s) => s.isFromCache, 'isFromCache', false)
+            .having((s) => s.isRevalidating, 'isRevalidating', false)
+            .having((s) => s.isOnline, 'isOnline', true),
+      ],
+      verify: (_) {
+        verifyNever(() => repository.fetchBreedsPage(page: any(named: 'page')));
+      },
     );
 
     blocTest<BreedsBloc, BreedsState>(
@@ -277,12 +312,625 @@ void main() {
       expect: () => [
         isA<BreedsState>()
             .having((s) => s.isOnline, 'isOnline', true)
+            .having((s) => s.isRevalidating, 'isRevalidating', true)
             .having((s) => s.notice?.kind, 'notice kind', BreedsNoticeKind.info),
         isA<BreedsState>()
             .having((s) => s.isFromCache, 'isFromCache', false)
+            .having((s) => s.isRevalidating, 'isRevalidating', false)
             .having((s) => s.breeds, 'breeds', [breed1, breed2]),
       ],
     );
+
+    blocTest<BreedsBloc, BreedsState>(
+      'clears isFromCache when next page loads successfully from network',
+      setUp: () {
+        when(() => repository.fetchBreedsPage(page: 2)).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 2,
+            lastPage: 3,
+            total: 60,
+            items: [breed3],
+          ),
+        );
+      },
+      build: () => BreedsBloc(
+        repository: repository,
+        connectivityMonitor: connectivity,
+      ),
+      seed: () => const BreedsState(
+        status: BreedsStatus.loaded,
+        breeds: [breed1, breed2],
+        currentPage: 1,
+        lastPage: 3,
+        total: 60,
+        isFromCache: true,
+      ),
+      act: (bloc) => bloc.add(const BreedsNextPageRequested()),
+      expect: () => [
+        isA<BreedsState>()
+            .having((s) => s.isLoadingMore, 'isLoadingMore', true),
+        isA<BreedsState>()
+            .having((s) => s.isLoadingMore, 'isLoadingMore', false)
+            .having((s) => s.isFromCache, 'isFromCache', false)
+            .having((s) => s.currentPage, 'currentPage', 2)
+            .having((s) => s.breeds, 'breeds', [breed1, breed2, breed3]),
+      ],
+    );
+
+    blocTest<BreedsBloc, BreedsState>(
+      'connectivity recovery protects deeper pagination when currentPage > 1',
+      setUp: () {
+        when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 1,
+            lastPage: 3,
+            total: 60,
+            items: [breed1],
+          ),
+        );
+      },
+      build: () => BreedsBloc(
+        repository: repository,
+        connectivityMonitor: connectivity,
+        clock: () => fixedNow,
+      ),
+      seed: () => const BreedsState(
+        status: BreedsStatus.loaded,
+        breeds: [breed1, breed2, breed3],
+        currentPage: 2,
+        lastPage: 3,
+        total: 60,
+        isFromCache: true,
+        isOnline: false,
+      ),
+      act: (_) => connectivityController.add(true),
+      wait: const Duration(milliseconds: 50),
+      expect: () => [
+        isA<BreedsState>()
+            .having((s) => s.isOnline, 'isOnline', true)
+            .having((s) => s.isRevalidating, 'isRevalidating', true),
+        isA<BreedsState>()
+            .having((s) => s.isRevalidating, 'isRevalidating', false)
+            .having((s) => s.isFromCache, 'isFromCache', false)
+            .having((s) => s.currentPage, 'currentPage', 2)
+            .having((s) => s.breeds, 'breeds', [breed1, breed2, breed3]),
+      ],
+    );
+
+    group('BreedsRefreshed', () {
+      test(
+        'reloads page 1 atomically without invalidating cache first and completes Completer',
+        () async {
+          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              items: [breed1, breed2],
+            ),
+          );
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+            clock: () => fixedNow,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              isFromCache: true,
+            ),
+          );
+
+          final completer = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: completer));
+          await completer.future;
+
+          expect(bloc.state.status, BreedsStatus.loaded);
+          expect(bloc.state.breeds, [breed1, breed2]);
+          expect(bloc.state.isFromCache, isFalse);
+          expect(bloc.state.isRevalidating, isFalse);
+          expect(bloc.state.lastSyncedAt, fixedNow);
+          verifyNever(() => repository.invalidateCache());
+        },
+      );
+
+      test(
+        'preserves cached data, emits warning notice and completes Completer when offline',
+        () async {
+          when(() => connectivity.hasConnection).thenAnswer((_) async => false);
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              isFromCache: true,
+            ),
+          );
+
+          final completer = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: completer));
+          await completer.future;
+
+          expect(bloc.state.isOnline, isFalse);
+          expect(bloc.state.isRevalidating, isFalse);
+          expect(bloc.state.breeds, [breed1]);
+          expect(bloc.state.notice?.kind, BreedsNoticeKind.warning);
+          verifyNever(() => repository.invalidateCache());
+          verifyNever(() => repository.fetchBreedsPage(page: any(named: 'page')));
+        },
+      );
+
+      test(
+        'preserves existing breeds and offline cache when remote refresh fails',
+        () async {
+          when(() => repository.fetchBreedsPage(page: 1))
+              .thenThrow(const NetworkFailure());
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1, breed2],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              isFromCache: true,
+            ),
+          );
+
+          final completer = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: completer));
+          await completer.future;
+
+          expect(bloc.state.status, BreedsStatus.loaded);
+          expect(bloc.state.breeds, [breed1, breed2]);
+          expect(bloc.state.isRevalidating, isFalse);
+          expect(bloc.state.notice?.kind, BreedsNoticeKind.error);
+          verifyNever(() => repository.invalidateCache());
+        },
+      );
+
+      test(
+        'completes discarded Completer immediately when a refresh is already running',
+        () async {
+          final page1Completer = Completer<BreedsPage>();
+          when(() => repository.fetchBreedsPage(page: 1))
+              .thenAnswer((_) => page1Completer.future);
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+            ),
+          );
+
+          final firstRefresh = Completer<void>();
+          final secondRefresh = Completer<void>();
+
+          bloc
+            ..add(BreedsRefreshed(completer: firstRefresh))
+            ..add(BreedsRefreshed(completer: secondRefresh));
+
+          await secondRefresh.future.timeout(const Duration(seconds: 1));
+          expect(firstRefresh.isCompleted, isFalse);
+          expect(secondRefresh.isCompleted, isTrue);
+
+          page1Completer.complete(
+            const BreedsPage(
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              items: [breed1, breed2],
+            ),
+          );
+          await firstRefresh.future.timeout(const Duration(seconds: 1));
+
+          verify(() => repository.fetchBreedsPage(page: 1)).called(1);
+          expect(bloc.state.breeds, [breed1, breed2]);
+        },
+      );
+    });
+
+    group('BreedsAppResumed', () {
+      blocTest<BreedsBloc, BreedsState>(
+        'skips revalidation when backgroundDuration < threshold and cache is fresh',
+        setUp: () {
+          when(() => repository.getCachedFirstPage()).thenReturn(
+            CachedBreedsResult(
+              page: const BreedsPage(
+                currentPage: 1,
+                lastPage: 2,
+                total: 40,
+                items: [breed1],
+              ),
+              cachedAt: fixedNow.subtract(const Duration(minutes: 2)),
+              isExpired: false,
+            ),
+          );
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+          foregroundRevalidateThreshold: const Duration(minutes: 5),
+        ),
+        seed: () => const BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [breed1],
+          currentPage: 1,
+          lastPage: 2,
+          total: 40,
+        ),
+        act: (bloc) => bloc.add(
+          const BreedsAppResumed(backgroundDuration: Duration(minutes: 2)),
+        ),
+        expect: () => <BreedsState>[],
+        verify: (_) {
+          verifyNever(
+            () => repository.fetchBreedsPage(page: any(named: 'page')),
+          );
+        },
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'revalidates page 1 when backgroundDuration meets threshold on page 1',
+        setUp: () {
+          when(() => repository.getCachedFirstPage()).thenReturn(
+            CachedBreedsResult(
+              page: const BreedsPage(
+                currentPage: 1,
+                lastPage: 2,
+                total: 40,
+                items: [breed1],
+              ),
+              cachedAt: fixedNow.subtract(const Duration(minutes: 6)),
+              isExpired: false,
+            ),
+          );
+          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+              items: [breed1, breed2],
+            ),
+          );
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+          foregroundRevalidateThreshold: const Duration(minutes: 5),
+          clock: () => fixedNow,
+        ),
+        seed: () => const BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [breed1],
+          currentPage: 1,
+          lastPage: 2,
+          total: 40,
+        ),
+        act: (bloc) => bloc.add(
+          const BreedsAppResumed(backgroundDuration: Duration(minutes: 6)),
+        ),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.isRevalidating, 'isRevalidating', true),
+          isA<BreedsState>()
+              .having((s) => s.isRevalidating, 'isRevalidating', false)
+              .having((s) => s.isFromCache, 'isFromCache', false)
+              .having((s) => s.breeds, 'breeds', [breed1, breed2])
+              .having((s) => s.lastSyncedAt, 'lastSyncedAt', fixedNow),
+        ],
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'refreshes cache without overwriting loaded pages when currentPage > 1',
+        setUp: () {
+          when(() => repository.getCachedFirstPage()).thenReturn(
+            CachedBreedsResult(
+              page: const BreedsPage(
+                currentPage: 1,
+                lastPage: 3,
+                total: 60,
+                items: [breed1],
+              ),
+              cachedAt: fixedNow.subtract(const Duration(minutes: 12)),
+              isExpired: true,
+            ),
+          );
+          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+              items: [breed1],
+            ),
+          );
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+          clock: () => fixedNow,
+        ),
+        seed: () => const BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [breed1, breed2, breed3],
+          currentPage: 2,
+          lastPage: 3,
+          total: 60,
+        ),
+        act: (bloc) => bloc.add(
+          const BreedsAppResumed(backgroundDuration: Duration(minutes: 1)),
+        ),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.isRevalidating, 'isRevalidating', true),
+          isA<BreedsState>()
+              .having((s) => s.isRevalidating, 'isRevalidating', false)
+              .having((s) => s.currentPage, 'currentPage', 2)
+              .having((s) => s.breeds, 'breeds', [breed1, breed2, breed3])
+              .having((s) => s.lastSyncedAt, 'lastSyncedAt', fixedNow),
+        ],
+      );
+    });
+
+    group('Race condition prevention', () {
+      test(
+        'in-flight SWR revalidation does not overwrite page 2 loaded while revalidating',
+        () async {
+          final swrCompleter = Completer<BreedsPage>();
+          when(() => repository.getCachedFirstPage()).thenReturn(
+            CachedBreedsResult(
+              page: const BreedsPage(
+                currentPage: 1,
+                lastPage: 3,
+                total: 60,
+                items: [breed1],
+              ),
+              cachedAt: fixedNow.subtract(const Duration(minutes: 15)),
+              isExpired: true,
+            ),
+          );
+          when(() => repository.fetchBreedsPage(page: 1))
+              .thenAnswer((_) => swrCompleter.future);
+          when(() => repository.fetchBreedsPage(page: 2)).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 2,
+              lastPage: 3,
+              total: 60,
+              items: [breed2, breed3],
+            ),
+          );
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+            clock: () => fixedNow,
+          );
+          addTearDown(bloc.close);
+
+          bloc.add(const BreedsStarted());
+          await bloc.stream.firstWhere(
+            (s) => s.status == BreedsStatus.loaded && s.isRevalidating,
+          );
+
+          bloc.add(const BreedsNextPageRequested());
+          await bloc.stream.firstWhere((s) => s.currentPage == 2);
+
+          expect(bloc.state.breeds, [breed1, breed2, breed3]);
+
+          // SWR finishes after page 2 is already loaded.
+          swrCompleter.complete(
+            const BreedsPage(
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+              items: [breed1],
+            ),
+          );
+          await bloc.stream.firstWhere((s) => !s.isRevalidating);
+
+          expect(bloc.state.currentPage, 2);
+          expect(bloc.state.breeds, [breed1, breed2, breed3]);
+          expect(bloc.state.isFromCache, isFalse);
+          expect(bloc.state.lastSyncedAt, fixedNow);
+        },
+      );
+
+      test(
+        'stale page 3 response is discarded after Pull-to-Refresh resets to page 1',
+        () async {
+          final page3Completer = Completer<BreedsPage>();
+          when(() => repository.fetchBreedsPage(page: 3))
+              .thenAnswer((_) => page3Completer.future);
+          when(() => repository.fetchBreedsPage(page: 1)).thenAnswer(
+            (_) async => const BreedsPage(
+              currentPage: 1,
+              lastPage: 3,
+              total: 60,
+              items: [breed1],
+            ),
+          );
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+            clock: () => fixedNow,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1, breed2],
+              currentPage: 2,
+              lastPage: 3,
+              total: 60,
+            ),
+          );
+
+          bloc.add(const BreedsNextPageRequested());
+          await bloc.stream.firstWhere((s) => s.isLoadingMore);
+
+          final refreshCompleter = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: refreshCompleter));
+          await refreshCompleter.future;
+
+          expect(bloc.state.currentPage, 1);
+          expect(bloc.state.breeds, [breed1]);
+          expect(bloc.state.isLoadingMore, isFalse);
+
+          // Late page 3 arrives after page 1 refresh completed.
+          page3Completer.complete(
+            const BreedsPage(
+              currentPage: 3,
+              lastPage: 3,
+              total: 60,
+              items: [breed3],
+            ),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+
+          expect(bloc.state.currentPage, 1);
+          expect(bloc.state.breeds, [breed1]);
+        },
+      );
+    });
+
+    group('Defensive non-AppFailure exception handling', () {
+      blocTest<BreedsBloc, BreedsState>(
+        'recovers to failure when connectivityMonitor throws unexpected error on start',
+        setUp: () {
+          when(() => connectivity.hasConnection)
+              .thenThrow(StateError('connectivity plugin error'));
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+        ),
+        act: (bloc) => bloc.add(const BreedsStarted()),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.status, 'status', BreedsStatus.failure)
+              .having((s) => s.isRevalidating, 'isRevalidating', false)
+              .having((s) => s.errorMessage, 'errorMessage', isNotNull),
+        ],
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'exits loading state cleanly when fetchBreedsPage throws non-AppFailure',
+        setUp: () {
+          when(() => repository.fetchBreedsPage(page: 1))
+              .thenThrow(Exception('SharedPreferences write failed'));
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+        ),
+        act: (bloc) => bloc.add(const BreedsStarted()),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.status, 'status', BreedsStatus.loading),
+          isA<BreedsState>()
+              .having((s) => s.status, 'status', BreedsStatus.failure)
+              .having((s) => s.errorMessage, 'errorMessage', isNotNull),
+        ],
+      );
+
+      test(
+        'catches unexpected errors in BreedsRefreshed and still completes Completer',
+        () async {
+          when(() => connectivity.hasConnection)
+              .thenThrow(StateError('unexpected'));
+
+          final bloc = BreedsBloc(
+            repository: repository,
+            connectivityMonitor: connectivity,
+          );
+          addTearDown(bloc.close);
+
+          bloc.emit(
+            const BreedsState(
+              status: BreedsStatus.loaded,
+              breeds: [breed1],
+              currentPage: 1,
+              lastPage: 2,
+              total: 40,
+            ),
+          );
+
+          final completer = Completer<void>();
+          bloc.add(BreedsRefreshed(completer: completer));
+          await completer.future.timeout(const Duration(seconds: 1));
+
+          expect(bloc.state.status, BreedsStatus.loaded);
+          expect(bloc.state.breeds, [breed1]);
+          expect(bloc.state.isRevalidating, isFalse);
+          expect(bloc.state.notice?.kind, BreedsNoticeKind.error);
+        },
+      );
+
+      blocTest<BreedsBloc, BreedsState>(
+        'resets isLoadingMore on unexpected error in BreedsNextPageRequested',
+        setUp: () {
+          when(() => repository.fetchBreedsPage(page: 2))
+              .thenThrow(StateError('unexpected pagination error'));
+        },
+        build: () => BreedsBloc(
+          repository: repository,
+          connectivityMonitor: connectivity,
+        ),
+        seed: () => const BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [breed1],
+          currentPage: 1,
+          lastPage: 3,
+          total: 60,
+        ),
+        act: (bloc) => bloc.add(const BreedsNextPageRequested()),
+        expect: () => [
+          isA<BreedsState>()
+              .having((s) => s.isLoadingMore, 'isLoadingMore', true),
+          isA<BreedsState>()
+              .having((s) => s.isLoadingMore, 'isLoadingMore', false)
+              .having((s) => s.breeds, 'breeds', [breed1])
+              .having(
+                (s) => s.paginationErrorMessage,
+                'paginationErrorMessage',
+                isNotNull,
+              ),
+        ],
+      );
+    });
   });
 
   group('BreedDetailCubit', () {
