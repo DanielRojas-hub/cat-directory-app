@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
@@ -106,8 +107,9 @@ final class ExponentialBackoffInterceptor extends Interceptor {
         return statusCode == 429 || statusCode >= 500;
       case DioExceptionType.cancel:
       case DioExceptionType.badCertificate:
-      case DioExceptionType.unknown:
         return false;
+      case DioExceptionType.unknown:
+        return err.error is IOException;
     }
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -150,6 +151,136 @@ void main() {
 
       expect(adapter.callCount, 0);
       expect(recordedDelays, isEmpty);
+    });
+
+    test(
+        'retries DioExceptionType.unknown wrapping SocketException (IOException) and resolves',
+        () async {
+      final recordedDelays = <Duration>[];
+      final adapter = _ScriptedHttpAdapter([
+        (_) async => throw const SocketException('Connection reset by peer'),
+        (_) async => throw const SocketException('Network is unreachable'),
+        (_) async => ResponseBody.fromString(
+              jsonEncode({'fact': 'Recovered after socket reset!', 'length': 29}),
+              200,
+              headers: {
+                Headers.contentTypeHeader: [Headers.jsonContentType],
+              },
+            ),
+      ]);
+
+      final dio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = adapter;
+
+      dio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: dio,
+          connectivityMonitor: connectivity,
+          maxRetries: 3,
+          baseDelay: const Duration(milliseconds: 500),
+          maxJitter: Duration.zero,
+          delayFn: (delay) async => recordedDelays.add(delay),
+          random: Random(0),
+        ),
+      );
+
+      final response = await dio.get<Map<String, dynamic>>('/fact');
+
+      expect(response.statusCode, 200);
+      expect(response.data?['fact'], 'Recovered after socket reset!');
+      expect(adapter.callCount, 3);
+      expect(
+        recordedDelays,
+        [const Duration(milliseconds: 500), const Duration(milliseconds: 1000)],
+      );
+    });
+
+    test('does not retry DioExceptionType.unknown wrapping non-IOException',
+        () async {
+      final recordedDelays = <Duration>[];
+      final adapter = _ScriptedHttpAdapter([
+        (_) async => throw const FormatException('Malformed frame'),
+      ]);
+
+      final dio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = adapter;
+
+      dio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: dio,
+          connectivityMonitor: connectivity,
+          maxRetries: 3,
+          baseDelay: const Duration(milliseconds: 500),
+          maxJitter: Duration.zero,
+          delayFn: (delay) async => recordedDelays.add(delay),
+        ),
+      );
+
+      await expectLater(
+        () => dio.get<Map<String, dynamic>>('/breeds'),
+        throwsA(
+          isA<DioException>()
+              .having((e) => e.type, 'type', DioExceptionType.unknown)
+              .having((e) => e.error, 'error', isA<FormatException>()),
+        ),
+      );
+
+      expect(adapter.callCount, 1);
+      expect(recordedDelays, isEmpty);
+    });
+
+    test('retries 429 rate-limit responses and does not retry 4xx client errors',
+        () async {
+      final rateLimitDelays = <Duration>[];
+      final rateLimitAdapter = _ScriptedHttpAdapter([
+        (_) async => ResponseBody.fromString('Too Many Requests', 429),
+        (_) async => ResponseBody.fromString(
+              jsonEncode({'fact': 'Back online', 'length': 11}),
+              200,
+              headers: {
+                Headers.contentTypeHeader: [Headers.jsonContentType],
+              },
+            ),
+      ]);
+
+      final rateLimitDio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = rateLimitAdapter;
+      rateLimitDio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: rateLimitDio,
+          connectivityMonitor: connectivity,
+          maxJitter: Duration.zero,
+          delayFn: (delay) async => rateLimitDelays.add(delay),
+        ),
+      );
+
+      final response = await rateLimitDio.get<Map<String, dynamic>>('/fact');
+      expect(response.statusCode, 200);
+      expect(rateLimitAdapter.callCount, 2);
+      expect(rateLimitDelays, [const Duration(milliseconds: 500)]);
+
+      final clientErrorDelays = <Duration>[];
+      final clientErrorAdapter = _ScriptedHttpAdapter([
+        (_) async => ResponseBody.fromString('Bad Request', 400),
+      ]);
+
+      final clientErrorDio = Dio(BaseOptions(baseUrl: 'https://catfact.ninja'))
+        ..httpClientAdapter = clientErrorAdapter;
+      clientErrorDio.interceptors.add(
+        ExponentialBackoffInterceptor(
+          dio: clientErrorDio,
+          connectivityMonitor: connectivity,
+          maxJitter: Duration.zero,
+          delayFn: (delay) async => clientErrorDelays.add(delay),
+        ),
+      );
+
+      await expectLater(
+        () => clientErrorDio.get<Map<String, dynamic>>('/breeds'),
+        throwsA(isA<DioException>()),
+      );
+      expect(clientErrorAdapter.callCount, 1);
+      expect(clientErrorDelays, isEmpty);
     });
   });
 }

@@ -79,7 +79,10 @@ final class ServerFailure extends AppFailure {
     super.message =
         'El servicio de Catfact Ninja no está disponible en este momento.',
     super.cause,
-  }) : super(isRetryable: true);
+  }) : super(
+          isRetryable:
+              statusCode == null || statusCode == 429 || statusCode >= 500,
+        );
 
   final int? statusCode;
 }
