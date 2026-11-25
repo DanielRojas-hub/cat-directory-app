@@ -4,36 +4,78 @@ import 'package:integration_test/integration_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// End-to-end scroll performance audit driving infinite scroll through all pages
-/// and capturing frame timing telemetry via [IntegrationTestWidgetsFlutterBinding].
+/// (98/98 breeds) and sustaining >200 continuous 60 Hz frames inside
+/// [IntegrationTestWidgetsFlutterBinding.traceAction].
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Infinite scroll stays jank-free across all loaded pages',
+  testWidgets('Sustained scroll across all 98 breeds stays jank-free (>200 frames)',
       (tester) async {
     await app.main();
-    await tester.pumpAndSettle(const Duration(seconds: 4));
 
+    // Wait for initial page to finish loading without relying on a single fixed delay.
     final scrollable = find.byType(CustomScrollView);
+    for (var attempt = 0; attempt < 40 && scrollable.evaluate().isEmpty; attempt++) {
+      await tester.pump(const Duration(milliseconds: 250));
+    }
     expect(scrollable, findsOneWidget);
 
+    // Phase 1: Paginate through the entire directory until all 98 breeds are loaded.
+    final endFooter = find.textContaining('Fin del directorio');
+    for (var step = 0; step < 35 && endFooter.evaluate().isEmpty; step++) {
+      await tester.fling(scrollable, const Offset(0, -1000), 2200);
+      for (var p = 0; p < 10 && endFooter.evaluate().isEmpty; p++) {
+        await tester.pump(const Duration(milliseconds: 120));
+      }
+    }
+    expect(endFooter, findsOneWidget);
+
+    // Phase 2: Measure sustained bidirectional scroll across all loaded breeds
+    // at 60 Hz frame cadence so the timeline captures >200 continuous frames.
+    const frameInterval = Duration(milliseconds: 16);
+    var drivenFrames = 0;
+
+    Future<void> pumpBallisticFrames(int count) async {
+      for (var i = 0; i < count; i++) {
+        await tester.pump(frameInterval);
+        drivenFrames++;
+      }
+    }
+
     await binding.traceAction(() async {
-      // Scroll through pages to load all 98 breeds and exercise SliverList recycling.
-      for (var i = 0; i < 14; i++) {
-        await tester.fling(scrollable, const Offset(0, -900), 1800);
-        await tester.pumpAndSettle(const Duration(milliseconds: 600));
+      for (var cycle = 0; cycle < 2; cycle++) {
+        // Sweep upward across the full 98-breed SliverList.
+        for (var seg = 0; seg < 2; seg++) {
+          await tester.timedDrag(
+            scrollable,
+            const Offset(0, 1100),
+            const Duration(milliseconds: 700),
+            frequency: 60.0,
+          );
+          drivenFrames += 42;
+        }
+        await tester.fling(scrollable, const Offset(0, 1200), 2400);
+        await pumpBallisticFrames(28);
+
+        // Sweep downward back to the bottom of the 98-breed SliverList.
+        for (var seg = 0; seg < 2; seg++) {
+          await tester.timedDrag(
+            scrollable,
+            const Offset(0, -1100),
+            const Duration(milliseconds: 700),
+            frequency: 60.0,
+          );
+          drivenFrames += 42;
+        }
+        await tester.fling(scrollable, const Offset(0, -1200), 2400);
+        await pumpBallisticFrames(28);
       }
 
-      // Sustained rapid scroll up & down with the full directory in memory.
-      for (var i = 0; i < 6; i++) {
-        await tester.fling(scrollable, const Offset(0, 950), 2200);
-        await tester.pump(const Duration(milliseconds: 250));
-      }
-      for (var i = 0; i < 6; i++) {
-        await tester.fling(scrollable, const Offset(0, -950), 2200);
-        await tester.pump(const Duration(milliseconds: 250));
-      }
-      await tester.pumpAndSettle();
-      await binding.takeScreenshot('performance_overlay_scroll');
+      // Settle briefly at the bottom so 98/98 and the end footer appear crisp.
+      await pumpBallisticFrames(12);
     }, reportKey: 'scroll_performance');
+
+    await binding.takeScreenshot('performance_overlay_scroll');
+    expect(drivenFrames, greaterThan(200));
   });
 }

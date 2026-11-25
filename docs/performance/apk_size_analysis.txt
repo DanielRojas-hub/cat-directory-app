@@ -1,3 +1,17 @@
+Universal Release APK:
+Command:
+flutter build apk --release
+
+Output summary:
+Built build/app/outputs/flutter-apk/app-release.apk (51.7MB)
+Included ABIs:
+- lib/arm64-v8a/libflutter.so
+- lib/armeabi-v7a/libflutter.so
+- lib/x86_64/libflutter.so
+
+--------------------------------------------------------------------------------
+
+Per-ABI Size Breakdown (--analyze-size requires a single --target-platform):
 Command:
 flutter build apk --release --analyze-size --target-platform android-arm64
 
@@ -13,7 +27,7 @@ app-release.apk (total compressed)                                         18 MB
   META-INF/
     androidx                                                               11 KB
   assets/
-    flutter_assets                                                        132 KB
+    flutter_assets                                                        133 KB
   classes.dex                                                             392 KB
   lib/
     arm64-v8a                                                              16 MB
