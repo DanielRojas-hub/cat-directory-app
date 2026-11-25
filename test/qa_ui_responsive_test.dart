@@ -13,6 +13,7 @@ import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail_state.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_bloc.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breeds_state.dart';
+import 'package:cat_directory_app/features/breeds/presentation/pages/breed_detail_page.dart';
 import 'package:cat_directory_app/features/breeds/presentation/pages/breeds_list_page.dart';
 import 'package:cat_directory_app/features/breeds/presentation/widgets/breed_card.dart';
 import 'package:cat_directory_app/features/breeds/presentation/widgets/cat_fact_card.dart';
@@ -96,14 +97,15 @@ void main() {
         page: any(named: 'page'),
         cancelToken: any(named: 'cancelToken'),
       ),
-    ).thenAnswer(
-      (_) async => const BreedsPage(
-        currentPage: 1,
+    ).thenAnswer((invocation) async {
+      final page = invocation.namedArguments[#page] as int;
+      return BreedsPage(
+        currentPage: page >= 2 ? 2 : 1,
         lastPage: 2,
         total: 40,
-        items: [_abyssinian, _bengal, _longBreed],
-      ),
-    );
+        items: const [_abyssinian, _bengal, _longBreed],
+      );
+    });
     when(
       () => repository.findBreedByName(
         any(),
@@ -823,6 +825,502 @@ void main() {
         );
         expect(builtStack, isA<Stack>());
         expect((builtStack as Stack).alignment, Alignment.topLeft);
+      },
+    );
+  });
+
+  group(
+      'Issue #14: L10n (es), double-tap guard, normalized search, post-frame scroll & copy',
+      () {
+    const perFoldBreed = Breed(
+      breed: 'PerFoldæ(Experimental Breed - WCF)',
+      country: 'Europe',
+      origin: 'Crossbreed',
+      coat: 'Long',
+      pattern: 'All',
+    );
+    const foldexBreed = Breed(
+      breed: 'Foldex[4]',
+      country: 'Canada',
+      origin: 'Crossbreed',
+      coat: 'Short',
+      pattern: 'All',
+    );
+    const donskoyBreed = Breed(
+      breed: 'Donskoy, or Don Sphynx',
+      country: 'Russia',
+      origin: 'Natural',
+      coat: 'Hairless',
+      pattern: 'Solid',
+    );
+    const accentedBreed = Breed(
+      breed: 'Égyptian Mau',
+      country: 'Egypt',
+      origin: 'Natural',
+      coat: 'Short',
+      pattern: 'Spotted',
+    );
+    const nfdBreed = Breed(
+      breed: 'e\u0301clair Cat',
+      country: 'France',
+      origin: 'Natural',
+      coat: 'Short',
+      pattern: 'Solid',
+    );
+
+    testWidgets(
+      'CatDirectoryApp configures Spanish Locale("es") and localized Material system strings (M5)',
+      (tester) async {
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedLoaded = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded,
+        );
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedLoaded);
+        await tester.pumpAndSettle();
+
+        final scaffoldContext = tester.element(find.byType(Scaffold));
+        expect(Localizations.localeOf(scaffoldContext), const Locale('es'));
+
+        final materialL10n = MaterialLocalizations.of(scaffoldContext);
+        expect(materialL10n.backButtonTooltip, 'Atrás');
+        expect(
+          materialL10n.refreshIndicatorSemanticLabel.toLowerCase(),
+          isNot('refresh'),
+        );
+
+        final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+        expect(app.locale, const Locale('es'));
+        expect(app.supportedLocales, contains(const Locale('es')));
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'rapid double-tap on BreedCard opens only one BreedDetailPage and resets after pop (M9)',
+      (tester) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: any(named: 'page'),
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 1,
+            lastPage: 1,
+            total: 2,
+            items: [_abyssinian, _bengal],
+          ),
+        );
+
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedLoaded = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded,
+        );
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedLoaded);
+        await tester.pumpAndSettle();
+
+        final firstCard = find.byType(BreedCard).first;
+        final secondCard = find.byType(BreedCard).at(1);
+
+        // Two rapid taps on the same card (and an extra rapid tap on another card).
+        await tester.tap(firstCard);
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.tap(firstCard, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.tap(secondCard, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BreedDetailPage), findsOneWidget);
+        expect(find.text('Abyssinian'), findsAtLeastNWidgets(1));
+        verify(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(1);
+
+        // A single back navigation must return straight to BreedsListPage.
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BreedDetailPage), findsNothing);
+        expect(find.byType(BreedsListPage), findsOneWidget);
+        expect(router.routeInformationProvider.value.uri.path, AppRoutes.home);
+
+        // Guard must reset so a subsequent tap opens BreedDetailPage normally.
+        await tester.tap(find.byType(BreedCard).at(1));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BreedDetailPage), findsOneWidget);
+        expect(find.text('Bengal'), findsAtLeastNWidgets(1));
+        verify(
+          () => repository.fetchRandomFact(
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).called(1);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    test(
+      'BreedsState.filteredBreeds normalizes diacritics and ligatures for real Catfact Ninja names (B12)',
+      () {
+        const baseState = BreedsState(
+          status: BreedsStatus.loaded,
+          breeds: [
+            perFoldBreed,
+            foldexBreed,
+            donskoyBreed,
+            accentedBreed,
+            nfdBreed,
+            _abyssinian,
+          ],
+          currentPage: 1,
+          lastPage: 1,
+          total: 6,
+        );
+
+        expect(
+          baseState.copyWith(searchQuery: 'perfoldae').filteredBreeds,
+          [perFoldBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'PerFoldæ').filteredBreeds,
+          [perFoldBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'foldex').filteredBreeds,
+          [foldexBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'Foldex[4]').filteredBreeds,
+          [foldexBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'don sphynx').filteredBreeds,
+          [donskoyBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'donskoy').filteredBreeds,
+          [donskoyBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'egyptian').filteredBreeds,
+          [accentedBreed],
+        );
+        expect(
+          baseState.copyWith(searchQuery: 'eclair').filteredBreeds,
+          [nfdBreed],
+        );
+      },
+    );
+
+    testWidgets(
+      'UI search finds PerFoldæ with "perfoldae", Foldex[4] and Donskoy, or Don Sphynx (B12)',
+      (tester) async {
+        when(
+          () => repository.fetchBreedsPage(
+            page: any(named: 'page'),
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 1,
+            lastPage: 1,
+            total: 4,
+            items: [perFoldBreed, foldexBreed, donskoyBreed, _abyssinian],
+          ),
+        );
+
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedLoaded = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded,
+        );
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedLoaded);
+        await tester.pumpAndSettle();
+
+        final queryPerFold = bloc.stream.firstWhere(
+          (s) => s.searchQuery == 'perfoldae',
+        );
+        await tester.enterText(find.byType(TextField), 'perfoldae');
+        await tester.runAsync(() => queryPerFold);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('PerFoldæ(Experimental Breed - WCF)'),
+          findsOneWidget,
+        );
+        expect(find.text('Foldex[4]'), findsNothing);
+
+        final queryFoldex = bloc.stream.firstWhere(
+          (s) => s.searchQuery == 'Foldex[4]',
+        );
+        await tester.enterText(find.byType(TextField), 'Foldex[4]');
+        await tester.runAsync(() => queryFoldex);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.descendant(
+            of: find.byType(BreedCard),
+            matching: find.text('Foldex[4]'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text('PerFoldæ(Experimental Breed - WCF)'),
+          findsNothing,
+        );
+
+        final queryDonskoy = bloc.stream.firstWhere(
+          (s) => s.searchQuery == 'don sphynx',
+        );
+        await tester.enterText(find.byType(TextField), 'don sphynx');
+        await tester.runAsync(() => queryDonskoy);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Donskoy, or Don Sphynx'), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'post-frame scroll check triggers next page on tall viewport and after Pull-to-Refresh (A3 UI)',
+      (tester) async {
+        _setViewport(tester, const Size(1024, 1366));
+
+        var page2Calls = 0;
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer(
+          (_) async => const BreedsPage(
+            currentPage: 1,
+            lastPage: 2,
+            total: 4,
+            items: [_abyssinian, _bengal],
+          ),
+        );
+        when(
+          () => repository.fetchBreedsPage(
+            page: 2,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
+          page2Calls++;
+          return const BreedsPage(
+            currentPage: 2,
+            lastPage: 2,
+            total: 4,
+            items: [foldexBreed, donskoyBreed],
+          );
+        });
+
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedPage1 = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded && s.currentPage == 1,
+        );
+        final reachedPage2 = bloc.stream.firstWhere(
+          (s) => s.currentPage == 2 && !s.isLoadingMore,
+        );
+
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedPage1);
+        await tester.pump();
+        await tester.pump();
+        await tester.runAsync(() => reachedPage2);
+        await tester.pumpAndSettle();
+
+        expect(page2Calls, 1);
+        expect(find.text('Abyssinian'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(BreedCard),
+            matching: find.text('Foldex[4]'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Donskoy, or Don Sphynx'), findsOneWidget);
+
+        // Pull-to-Refresh resets to page 1 (hasMore: true); post-frame check
+        // must automatically fetch page 2 again without manual downward scroll.
+        final refreshedPage1 = bloc.stream.firstWhere(
+          (s) => s.currentPage == 1 && !s.isRevalidating,
+        );
+        final reachedPage2Again = bloc.stream.firstWhere(
+          (s) => s.currentPage == 2 && !s.isLoadingMore && !s.isRevalidating,
+        );
+        await tester.fling(
+          find.byType(CustomScrollView),
+          const Offset(0, 350),
+          1000,
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        await tester.runAsync(() => refreshedPage1);
+        await tester.pump();
+        await tester.pump();
+        await tester.runAsync(() => reachedPage2Again);
+        await tester.pumpAndSettle();
+
+        expect(page2Calls, 2);
+        expect(
+          find.descendant(
+            of: find.byType(BreedCard),
+            matching: find.text('Foldex[4]'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'ConnectivityStatusBanner Reintentar dispatches BreedsStarted when breeds.isEmpty (M6 UI)',
+      (tester) async {
+        var online = false;
+        when(() => connectivity.hasConnection).thenAnswer((_) async => online);
+        when(
+          () => repository.fetchBreedsPage(
+            page: 1,
+            cancelToken: any(named: 'cancelToken'),
+          ),
+        ).thenAnswer((_) async {
+          if (!online) {
+            throw const NetworkFailure();
+          }
+          return const BreedsPage(
+            currentPage: 1,
+            lastPage: 1,
+            total: 1,
+            items: [_abyssinian],
+          );
+        });
+
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedFailure = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.failure,
+        );
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedFailure);
+        await tester.pumpAndSettle();
+
+        expect(bloc.state.breeds, isEmpty);
+        final bannerRetryButton = find.descendant(
+          of: find.byType(ConnectivityStatusBanner),
+          matching: find.text('Reintentar'),
+        );
+        expect(bannerRetryButton, findsOneWidget);
+
+        // Restore connectivity and tap Reintentar in the banner.
+        online = true;
+        final reachedLoading = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loading,
+        );
+        final reachedLoaded = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded && s.breeds.isNotEmpty,
+        );
+
+        await tester.tap(bannerRetryButton);
+        await tester.runAsync(() async {
+          await reachedLoading;
+          await reachedLoaded;
+        });
+        await tester.pumpAndSettle();
+
+        expect(find.text('Abyssinian'), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'AppBar chip Semantics and PaginationFooter avoid "de 0" when total == 0 (B6)',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+
+        bloc.emit(
+          const BreedsState(
+            status: BreedsStatus.loaded,
+            breeds: [_abyssinian, _bengal],
+            searchQuery: 'Aby',
+            currentPage: 1,
+            lastPage: 2,
+            total: 0,
+            isOnline: true,
+          ),
+        );
+
+        await tester.pumpWidget(
+          BlocProvider<BreedsBloc>.value(
+            value: bloc,
+            child: MaterialApp(
+              theme: AppTheme.light(),
+              home: const BreedsListPage(),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          find.bySemanticsLabel('2 razas cargadas, en línea'),
+          findsOneWidget,
+        );
+        expect(
+          find.bySemanticsLabel(RegExp('de 0')),
+          findsNothing,
+        );
+        expect(
+          find.text('Filtrando sobre 2 razas cargadas en memoria'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('de 0'), findsNothing);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        handle.dispose();
       },
     );
   });

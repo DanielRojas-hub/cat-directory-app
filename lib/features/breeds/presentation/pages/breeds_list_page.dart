@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../../core/router/app_router.dart';
+import '../../domain/entities/breed.dart';
 import '../bloc/breeds_bloc.dart';
 import '../bloc/breeds_event.dart';
 import '../bloc/breeds_state.dart';
@@ -27,6 +28,9 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
   late final ScrollController _scrollController;
   late final TextEditingController _searchController;
+  bool _isNavigatingToDetail = false;
+  bool _postFrameScrollCheckScheduled = false;
+  GoRouterDelegate? _attachedRouterDelegate;
 
   @override
   void initState() {
@@ -35,6 +39,67 @@ class _BreedsListPageState extends State<BreedsListPage> {
     _searchController = TextEditingController(
       text: context.read<BreedsBloc>().state.searchQuery,
     );
+    _schedulePostFrameScrollCheck();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final routerDelegate = GoRouter.maybeOf(context)?.routerDelegate;
+    if (routerDelegate != _attachedRouterDelegate) {
+      _attachedRouterDelegate?.removeListener(_onRouterLocationChanged);
+      _attachedRouterDelegate = routerDelegate;
+      _attachedRouterDelegate?.addListener(_onRouterLocationChanged);
+    }
+  }
+
+  void _onRouterLocationChanged() {
+    final path = _attachedRouterDelegate?.currentConfiguration.uri.path;
+    if (path == AppRoutes.home && _isNavigatingToDetail) {
+      _isNavigatingToDetail = false;
+    }
+  }
+
+  void _schedulePostFrameScrollCheck({bool onlyWhenUnscrollable = false}) {
+    if (_postFrameScrollCheckScheduled) return;
+    _postFrameScrollCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _postFrameScrollCheckScheduled = false;
+      if (!mounted) return;
+      final state = context.read<BreedsBloc>().state;
+      if (!state.isOnline || state.isRevalidating) return;
+      if (onlyWhenUnscrollable &&
+          _scrollController.hasClients &&
+          _scrollController.position.maxScrollExtent > 0) {
+        return;
+      }
+      _onScroll();
+    });
+  }
+
+  Future<void> _openBreedDetail(Breed breed) async {
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+
+    final router = GoRouter.maybeOf(context);
+    if (router != null &&
+        router.routerDelegate.currentConfiguration.uri.path != AppRoutes.home) {
+      return;
+    }
+
+    if (_isNavigatingToDetail) return;
+    _isNavigatingToDetail = true;
+
+    try {
+      await context.push(
+        AppRoutes.breedDetailPath(breed.breed),
+        extra: breed,
+      );
+    } finally {
+      if (mounted) {
+        _isNavigatingToDetail = false;
+      }
+    }
   }
 
   void _onScroll() {
@@ -56,6 +121,8 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
   @override
   void dispose() {
+    _attachedRouterDelegate?.removeListener(_onRouterLocationChanged);
+    _attachedRouterDelegate = null;
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -118,16 +185,46 @@ class _BreedsListPageState extends State<BreedsListPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return BlocListener<BreedsBloc, BreedsState>(
-      listenWhen: (previous, current) =>
-          current.notice != null && previous.notice?.id != current.notice?.id,
-      listener: (context, state) {
-        final notice = state.notice;
-        if (notice != null) {
-          _showNoticeSnackBar(context, notice);
-          context.read<BreedsBloc>().add(const BreedsNoticeCleared());
-        }
-      },
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<BreedsBloc, BreedsState>(
+          listenWhen: (previous, current) =>
+              current.notice != null && previous.notice?.id != current.notice?.id,
+          listener: (context, state) {
+            final notice = state.notice;
+            if (notice != null) {
+              _showNoticeSnackBar(context, notice);
+              context.read<BreedsBloc>().add(const BreedsNoticeCleared());
+            }
+          },
+        ),
+        BlocListener<BreedsBloc, BreedsState>(
+          listenWhen: (previous, current) =>
+              current.status == BreedsStatus.loaded &&
+              current.hasMore &&
+              !current.isSearching &&
+              !current.isLoadingMore &&
+              !current.isRevalidating &&
+              current.paginationErrorMessage == null &&
+              (previous.status != BreedsStatus.loaded ||
+                  previous.isRevalidating ||
+                  previous.isSearching),
+          listener: (context, state) => _schedulePostFrameScrollCheck(),
+        ),
+        BlocListener<BreedsBloc, BreedsState>(
+          listenWhen: (previous, current) =>
+              current.status == BreedsStatus.loaded &&
+              current.hasMore &&
+              !current.isSearching &&
+              previous.isLoadingMore &&
+              !current.isLoadingMore &&
+              !current.isRevalidating &&
+              current.paginationErrorMessage == null,
+          listener: (context, state) => _schedulePostFrameScrollCheck(
+            onlyWhenUnscrollable: true,
+          ),
+        ),
+      ],
       child: Scaffold(
         appBar: AppBar(
           title: const Row(
@@ -158,11 +255,14 @@ class _BreedsListPageState extends State<BreedsListPage> {
                 final countLabel = state.total > 0
                     ? '${state.breeds.length}/${state.total}'
                     : '${state.breeds.length}';
+                final countSemantics = state.total > 0
+                    ? '${state.breeds.length} de ${state.total} razas cargadas'
+                    : '${state.breeds.length} razas cargadas';
                 return Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: Semantics(
                     label:
-                        '${state.breeds.length} de ${state.total} razas cargadas, ${state.isOnline ? 'en línea' : 'sin conexión'}',
+                        '$countSemantics, ${state.isOnline ? 'en línea' : 'sin conexión'}',
                     excludeSemantics: true,
                     child: Chip(
                       visualDensity: VisualDensity.compact,
@@ -232,15 +332,22 @@ class _BreedsListPageState extends State<BreedsListPage> {
                     prev.isOnline != curr.isOnline ||
                     prev.isFromCache != curr.isFromCache ||
                     prev.isRevalidating != curr.isRevalidating ||
-                    prev.lastSyncedAt != curr.lastSyncedAt,
+                    prev.lastSyncedAt != curr.lastSyncedAt ||
+                    prev.breeds.isEmpty != curr.breeds.isEmpty,
                 builder: (context, state) {
                   return ConnectivityStatusBanner(
                     isOnline: state.isOnline,
                     isFromCache: state.isFromCache,
                     isRevalidating: state.isRevalidating,
                     lastSyncedAt: state.lastSyncedAt,
-                    onRetry: () =>
-                        context.read<BreedsBloc>().add(const BreedsRefreshed()),
+                    onRetry: () {
+                      final bloc = context.read<BreedsBloc>();
+                      bloc.add(
+                        bloc.state.breeds.isEmpty
+                            ? const BreedsStarted()
+                            : const BreedsRefreshed(),
+                      );
+                    },
                   );
                 },
               ),
@@ -320,9 +427,8 @@ class _BreedsListPageState extends State<BreedsListPage> {
                                   final breed = visibleBreeds[index];
                                   return BreedCard(
                                     breed: breed,
-                                    onTap: () => context.push(
-                                      AppRoutes.breedDetailPath(breed.breed),
-                                      extra: breed,
+                                    onTap: () => unawaited(
+                                      _openBreedDetail(breed),
                                     ),
                                   );
                                 },

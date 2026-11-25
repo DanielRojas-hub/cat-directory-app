@@ -24,7 +24,7 @@ class BreedCard extends StatelessWidget {
         button: true,
         onTap: onTap,
         label: 'Raza ${breed.breed}, país de origen ${breed.displayCountry}',
-        hint: 'Toca dos veces para ver detalles y un dato curioso',
+        onTapHint: 'ver detalles y un dato curioso',
         excludeSemantics: true,
         child: Card(
           margin: EdgeInsets.zero,

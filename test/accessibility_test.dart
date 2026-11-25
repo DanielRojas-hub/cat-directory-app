@@ -80,14 +80,23 @@ void main() {
           page: any(named: 'page'),
           cancelToken: any(named: 'cancelToken'),
         ),
-      ).thenAnswer(
-        (_) async => const BreedsPage(
-          currentPage: 1,
+      ).thenAnswer((invocation) async {
+        final page = invocation.namedArguments[#page] as int;
+        if (page == 1) {
+          return const BreedsPage(
+            currentPage: 1,
+            lastPage: 2,
+            total: 2,
+            items: [sampleBreed],
+          );
+        }
+        return const BreedsPage(
+          currentPage: 2,
           lastPage: 2,
-          total: 40,
-          items: [sampleBreed],
-        ),
-      );
+          total: 2,
+          items: [secondBreed],
+        );
+      });
       when(
         () => repository.findBreedByName(
           'Abyssinian',
@@ -148,6 +157,7 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -224,6 +234,7 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
 
       final reachedCleared = bloc.stream.firstWhere(
         (s) => s.searchQuery.isEmpty,
@@ -273,6 +284,14 @@ void main() {
       final cardData = breedCardFinder.evaluate().single.getSemanticsData();
       expect(cardData.flagsCollection.isButton, isTrue);
       expect(cardData.hasAction(SemanticsAction.tap), isTrue);
+      expect(cardData.hint, isEmpty);
+      final tapHintActions = (cardData.customSemanticsActionIds ?? const <int>[])
+          .map(CustomSemanticsAction.getAction)
+          .whereType<CustomSemanticsAction>()
+          .where((a) => a.action == SemanticsAction.tap)
+          .toList();
+      expect(tapHintActions, hasLength(1));
+      expect(tapHintActions.single.hint, 'ver detalles y un dato curioso');
 
       tester.semantics.tap(breedCardFinder);
       await tester.pumpAndSettle();
@@ -340,6 +359,7 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
 
       final refreshButtonFinder = find.byTooltip(
         'Cargar otro dato curioso aleatorio',
@@ -432,10 +452,63 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       handle.dispose();
     });
+
+    for (final brightness in const [Brightness.light, Brightness.dark]) {
+      final modeLabel = brightness == Brightness.light ? 'Light' : 'Dark';
+
+      testWidgets(
+          'Home screen and BreedDetailPage satisfy textContrastGuideline in $modeLabel Mode',
+          (tester) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+
+        final handle = tester.ensureSemantics();
+        final router = createAppRouter(
+          detailCubitFactory: () => BreedDetailCubit(repository: repository),
+        );
+        addTearDown(router.dispose);
+
+        final reachedLoaded = bloc.stream.firstWhere(
+          (s) => s.status == BreedsStatus.loaded,
+        );
+
+        await tester.pumpWidget(
+          CatDirectoryApp(breedsBloc: bloc, router: router),
+        );
+        await tester.runAsync(() => reachedLoaded);
+        await tester.pumpAndSettle();
+
+        final homeScaffold = tester.element(find.byType(Scaffold));
+        expect(Theme.of(homeScaffold).brightness, brightness);
+
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+
+        // Open detail page and verify contrast in the same brightness mode.
+        final cardFinder = find.semantics.byLabel(
+          RegExp('Raza Abyssinian, país de origen Ethiopia'),
+        );
+        tester.semantics.tap(cardFinder);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BreedDetailPage), findsOneWidget);
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        handle.dispose();
+      });
+    }
   });
 }
