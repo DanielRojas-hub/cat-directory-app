@@ -14,11 +14,17 @@ final class BreedsRepositoryImpl implements BreedsRepository {
     required this._remoteDataSource,
     required this._localDataSource,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+    this.maxLookupPages = defaultMaxLookupPages,
+  })  : assert(maxLookupPages > 0, 'maxLookupPages must be greater than zero.'),
+        _clock = clock ?? DateTime.now;
+
+  /// Upper bound on remote pages inspected during cold-start deep-link lookups.
+  static const int defaultMaxLookupPages = 20;
 
   final BreedsRemoteDataSource _remoteDataSource;
   final BreedsLocalDataSource _localDataSource;
   final DateTime Function() _clock;
+  final int maxLookupPages;
 
   final Map<String, Breed> _memoryIndex = <String, Breed>{};
 
@@ -66,6 +72,11 @@ final class BreedsRepositoryImpl implements BreedsRepository {
   @override
   Future<Breed> findBreedByName(String name) async {
     final normalized = _normalizeKey(name);
+    if (normalized.isEmpty) {
+      throw NotFoundFailure(
+        message: 'No encontramos la raza "$name" en el directorio.',
+      );
+    }
 
     final inMemory = _memoryIndex[normalized];
     if (inMemory != null) {
@@ -100,7 +111,7 @@ final class BreedsRepositoryImpl implements BreedsRepository {
 
       lastPage = entity.lastPage;
       currentPage++;
-    } while (currentPage <= lastPage);
+    } while (currentPage <= lastPage && currentPage <= maxLookupPages);
 
     throw NotFoundFailure(
       message: 'No encontramos la raza "$name" en el directorio.',

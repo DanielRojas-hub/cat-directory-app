@@ -6,6 +6,7 @@ import 'package:cat_directory_app/core/network/connectivity_monitor.dart';
 import 'package:cat_directory_app/features/breeds/domain/entities/breed.dart';
 import 'package:cat_directory_app/features/breeds/domain/entities/breeds_page.dart';
 import 'package:cat_directory_app/features/breeds/domain/entities/cached_breeds_result.dart';
+import 'package:cat_directory_app/features/breeds/domain/entities/cat_fact.dart';
 import 'package:cat_directory_app/features/breeds/domain/repositories/breeds_repository.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail_cubit.dart';
 import 'package:cat_directory_app/features/breeds/presentation/bloc/breed_detail_state.dart';
@@ -286,6 +287,11 @@ void main() {
   });
 
   group('BreedDetailCubit', () {
+    const sampleFact = CatFact(
+      fact: 'Cats have 32 muscles in each ear.',
+      length: 33,
+    );
+
     late _MockBreedsRepository repository;
 
     setUp(() {
@@ -308,6 +314,110 @@ void main() {
         expect(cubit.state.breed, breed1);
         expect(cubit.state.factStatus, CatFactStatus.failure);
         expect(cubit.state.factErrorMessage, isNotNull);
+      },
+    );
+
+    blocTest<BreedDetailCubit, BreedDetailState>(
+      'resolves breed on cold start (initialBreed: null) alongside random fact',
+      setUp: () {
+        when(() => repository.findBreedByName(breed3.breed))
+            .thenAnswer((_) async => breed3);
+        when(() => repository.fetchRandomFact())
+            .thenAnswer((_) async => sampleFact);
+      },
+      build: () => BreedDetailCubit(repository: repository),
+      act: (cubit) => cubit.load(breedName: breed3.breed),
+      expect: () => [
+        isA<BreedDetailState>()
+            .having((s) => s.factStatus, 'factStatus', CatFactStatus.loading),
+        isA<BreedDetailState>()
+            .having((s) => s.breedStatus, 'breedStatus', BreedDetailStatus.loading)
+            .having((s) => s.factStatus, 'factStatus', CatFactStatus.loading),
+        isA<BreedDetailState>()
+            .having((s) => s.breedStatus, 'breedStatus', BreedDetailStatus.loading)
+            .having((s) => s.factStatus, 'factStatus', CatFactStatus.loaded)
+            .having((s) => s.fact, 'fact', sampleFact),
+        isA<BreedDetailState>()
+            .having((s) => s.breedStatus, 'breedStatus', BreedDetailStatus.loaded)
+            .having((s) => s.breed, 'breed', breed3)
+            .having((s) => s.breedErrorMessage, 'breedErrorMessage', isNull)
+            .having((s) => s.factStatus, 'factStatus', CatFactStatus.loaded)
+            .having((s) => s.fact, 'fact', sampleFact),
+      ],
+      verify: (_) {
+        verify(() => repository.findBreedByName(breed3.breed)).called(1);
+        verify(() => repository.fetchRandomFact()).called(1);
+      },
+    );
+
+    blocTest<BreedDetailCubit, BreedDetailState>(
+      'emits failure state on cold start when findBreedByName throws AppFailure',
+      setUp: () {
+        when(() => repository.findBreedByName('UnknownBreed')).thenThrow(
+          const NotFoundFailure(message: 'Raza no encontrada.'),
+        );
+        when(() => repository.fetchRandomFact())
+            .thenAnswer((_) async => sampleFact);
+      },
+      build: () => BreedDetailCubit(repository: repository),
+      act: (cubit) => cubit.load(breedName: 'UnknownBreed'),
+      verify: (cubit) {
+        expect(cubit.state.breedStatus, BreedDetailStatus.failure);
+        expect(cubit.state.breed, isNull);
+        expect(cubit.state.breedErrorMessage, 'Raza no encontrada.');
+        expect(cubit.state.factStatus, CatFactStatus.loaded);
+      },
+    );
+
+    blocTest<BreedDetailCubit, BreedDetailState>(
+      'defensively catches non-AppFailure Object errors in breed lookup and fact loading',
+      setUp: () {
+        when(() => repository.findBreedByName(breed1.breed))
+            .thenThrow(StateError('unexpected lookup failure'));
+        when(() => repository.fetchRandomFact())
+            .thenThrow(const FormatException('corrupt fact payload'));
+      },
+      build: () => BreedDetailCubit(repository: repository),
+      act: (cubit) => cubit.load(breedName: breed1.breed),
+      verify: (cubit) {
+        expect(cubit.state.breedStatus, BreedDetailStatus.failure);
+        expect(
+          cubit.state.breedErrorMessage,
+          const UnknownFailure().message,
+        );
+        expect(cubit.state.factStatus, CatFactStatus.failure);
+        expect(
+          cubit.state.factErrorMessage,
+          const UnknownFailure().message,
+        );
+      },
+    );
+
+    blocTest<BreedDetailCubit, BreedDetailState>(
+      'retryBreedLookup recovers from cold-start error and clears error message',
+      setUp: () {
+        var calls = 0;
+        when(() => repository.findBreedByName(breed3.breed))
+            .thenAnswer((_) async {
+          calls++;
+          if (calls == 1) {
+            throw const NetworkFailure();
+          }
+          return breed3;
+        });
+        when(() => repository.fetchRandomFact())
+            .thenAnswer((_) async => sampleFact);
+      },
+      build: () => BreedDetailCubit(repository: repository),
+      act: (cubit) async {
+        await cubit.load(breedName: breed3.breed);
+        await cubit.retryBreedLookup(breed3.breed);
+      },
+      verify: (cubit) {
+        expect(cubit.state.breedStatus, BreedDetailStatus.loaded);
+        expect(cubit.state.breed, breed3);
+        expect(cubit.state.breedErrorMessage, isNull);
+        verify(() => repository.findBreedByName(breed3.breed)).called(2);
       },
     );
   });
