@@ -36,12 +36,25 @@ class BreedAvatar extends StatelessWidget {
     Color(0xFF1A4B4D),
   ];
 
+  /// Computes a deterministic palette index from [breedName] UTF-16 code units
+  /// so avatar colors remain stable across process restarts and platforms.
+  static int paletteIndexFor(String breedName, {int paletteLength = 6}) {
+    var hash = 0;
+    for (final unit in breedName.codeUnits) {
+      hash = (hash * 17 + unit) & 0x7fffffff;
+    }
+    return hash % paletteLength;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final palette = isDark ? _paletteDark : _paletteLight;
-    final bgColor = palette[breed.breed.hashCode.abs() % palette.length];
+    final bgColor = palette[paletteIndexFor(
+      breed.breed,
+      paletteLength: palette.length,
+    )];
     final fgColor = isDark
         ? theme.colorScheme.onSurface
         : theme.colorScheme.onSurface.withValues(alpha: 0.85);
@@ -50,18 +63,24 @@ class BreedAvatar extends StatelessWidget {
       child: Container(
         width: size,
         height: size,
+        padding: EdgeInsets.all(size * 0.08),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(size * 0.28),
         ),
-        child: Text(
-          breed.initials,
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: fgColor,
-            fontWeight: FontWeight.w700,
-            fontSize: size * 0.36,
-            letterSpacing: 0.4,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            breed.initials,
+            maxLines: 1,
+            softWrap: false,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: fgColor,
+              fontWeight: FontWeight.w700,
+              fontSize: size * 0.36,
+              letterSpacing: 0.4,
+            ),
           ),
         ),
       ),

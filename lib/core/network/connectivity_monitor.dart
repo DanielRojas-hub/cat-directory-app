@@ -5,7 +5,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 /// Note: Interface connectivity (Wi-Fi/Cellular) does not guarantee upstream
 /// reachability; transient HTTP errors are handled by the backoff interceptor.
 abstract interface class ConnectivityMonitor {
-  /// Returns `true` when at least one non-`none` network interface is active.
+  /// Returns `true` when at least one real network interface
+  /// (`wifi`, `mobile`, `ethernet`, or `vpn`) is active.
   Future<bool> get hasConnection;
 
   /// Emits deduplicated connectivity state changes (`true` = online, `false` = offline).
@@ -15,6 +16,13 @@ abstract interface class ConnectivityMonitor {
 final class ConnectivityPlusMonitor implements ConnectivityMonitor {
   ConnectivityPlusMonitor({Connectivity? connectivity})
       : _connectivity = connectivity ?? Connectivity();
+
+  static const Set<ConnectivityResult> _networkInterfaces = {
+    ConnectivityResult.wifi,
+    ConnectivityResult.mobile,
+    ConnectivityResult.ethernet,
+    ConnectivityResult.vpn,
+  };
 
   final Connectivity _connectivity;
 
@@ -32,6 +40,6 @@ final class ConnectivityPlusMonitor implements ConnectivityMonitor {
   }
 
   bool _isConnected(List<ConnectivityResult> results) {
-    return results.any((result) => result != ConnectivityResult.none);
+    return results.any(_networkInterfaces.contains);
   }
 }
