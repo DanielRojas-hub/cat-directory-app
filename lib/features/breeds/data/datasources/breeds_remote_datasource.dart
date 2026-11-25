@@ -61,7 +61,13 @@ final class BreedsRemoteDataSourceImpl implements BreedsRemoteDataSource {
           message: 'La API no devolvió un dato curioso.',
         );
       }
-      return CatFactModel.fromJson(data);
+      final model = CatFactModel.fromJson(data);
+      if (model.fact.trim().isEmpty) {
+        throw const ServerFailure(
+          message: 'La API devolvió un dato curioso vacío.',
+        );
+      }
+      return model;
     } on DioException catch (e) {
       throw AppFailure.fromDioException(e);
     } on AppFailure {

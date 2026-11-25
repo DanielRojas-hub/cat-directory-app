@@ -81,18 +81,29 @@ class CatFactCard extends StatelessWidget {
             const SizedBox(height: 14),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 220),
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  alignment: Alignment.topLeft,
+                  children: [
+                    ...previousChildren,
+                    ?currentChild,
+                  ],
+                );
+              },
               child: switch (status) {
                 CatFactStatus.initial || CatFactStatus.loading =>
                   const FactSkeleton(key: ValueKey('fact-loading')),
-                CatFactStatus.loaded => Semantics(
-                    key: ValueKey('fact-${fact?.fact}'),
+                CatFactStatus.loaded
+                    when (fact?.fact.trim().isNotEmpty ?? false) =>
+                  Semantics(
+                    key: ValueKey('fact-${fact!.fact.trim()}'),
                     liveRegion: true,
                     container: true,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '“${fact?.fact ?? ''}”',
+                          '“${fact!.fact.trim()}”',
                           style: theme.textTheme.bodyLarge?.copyWith(
                             height: 1.45,
                             fontStyle: FontStyle.italic,
@@ -108,7 +119,7 @@ class CatFactCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                CatFactStatus.failure => Semantics(
+                CatFactStatus.loaded || CatFactStatus.failure => Semantics(
                     key: const ValueKey('fact-error'),
                     liveRegion: true,
                     container: true,
@@ -127,8 +138,10 @@ class CatFactCard extends StatelessWidget {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                errorMessage ??
-                                    'No pudimos obtener un dato curioso en este momento.',
+                                status == CatFactStatus.failure
+                                    ? (errorMessage ??
+                                        'No pudimos obtener un dato curioso en este momento.')
+                                    : 'No hay un dato curioso disponible en este momento.',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                 ),

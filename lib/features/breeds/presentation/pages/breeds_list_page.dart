@@ -30,7 +30,9 @@ class _BreedsListPageState extends State<BreedsListPage> {
   void initState() {
     super.initState();
     _scrollController = ScrollController()..addListener(_onScroll);
-    _searchController = TextEditingController();
+    _searchController = TextEditingController(
+      text: context.read<BreedsBloc>().state.searchQuery,
+    );
   }
 
   void _onScroll() {
@@ -123,9 +125,13 @@ class _BreedsListPageState extends State<BreedsListPage> {
             children: [
               Icon(Icons.pets_rounded, size: 22),
               SizedBox(width: 8),
-              Text(
-                'Cat Directory',
-                style: TextStyle(fontWeight: FontWeight.w700),
+              Flexible(
+                child: Text(
+                  'Cat Directory',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ],
           ),
@@ -170,156 +176,205 @@ class _BreedsListPageState extends State<BreedsListPage> {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _searchController,
-                builder: (context, value, _) {
-                  return Semantics(
-                    label: 'Buscar raza de gato',
-                    hint: 'Filtra por nombre entre las razas cargadas',
-                    textField: true,
-                    child: TextField(
-                      controller: _searchController,
-                      textInputAction: TextInputAction.search,
-                      onChanged: (query) => context
-                          .read<BreedsBloc>()
-                          .add(BreedsSearchQueryChanged(query)),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar raza (ej. Abyssinian)...',
-                        prefixIcon: const ExcludeSemantics(
-                          child: Icon(Icons.search_rounded),
-                        ),
-                        suffixIcon: value.text.isNotEmpty
-                            ? IconButton(
-                                tooltip: 'Limpiar búsqueda',
-                                onPressed: () {
-                                  _searchController.clear();
-                                  context
-                                      .read<BreedsBloc>()
-                                      .add(const BreedsSearchQueryChanged(''));
-                                },
-                                icon: const Icon(Icons.close_rounded),
-                              )
-                            : null,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            BlocBuilder<BreedsBloc, BreedsState>(
-              buildWhen: (prev, curr) =>
-                  prev.isOnline != curr.isOnline ||
-                  prev.isFromCache != curr.isFromCache ||
-                  prev.isRevalidating != curr.isRevalidating ||
-                  prev.lastSyncedAt != curr.lastSyncedAt,
-              builder: (context, state) {
-                return ConnectivityStatusBanner(
-                  isOnline: state.isOnline,
-                  isFromCache: state.isFromCache,
-                  isRevalidating: state.isRevalidating,
-                  lastSyncedAt: state.lastSyncedAt,
-                  onRetry: () =>
-                      context.read<BreedsBloc>().add(const BreedsRefreshed()),
-                );
-              },
-            ),
-            Expanded(
-              child: BlocBuilder<BreedsBloc, BreedsState>(
-                builder: (context, state) {
-                  if (state.status == BreedsStatus.initial ||
-                      (state.status == BreedsStatus.loading &&
-                          state.breeds.isEmpty)) {
-                    return const BreedsSkeletonList();
-                  }
-
-                  if (state.status == BreedsStatus.failure &&
-                      state.breeds.isEmpty) {
-                    return _InitialErrorView(
-                      message: state.errorMessage ??
-                          'No pudimos cargar el directorio de razas.',
-                      isOnline: state.isOnline,
-                      onRetry: () =>
-                          context.read<BreedsBloc>().add(const BreedsStarted()),
-                    );
-                  }
-
-                  final visibleBreeds = state.filteredBreeds;
-
-                  if (visibleBreeds.isEmpty && state.isSearching) {
-                    return _EmptySearchView(
-                      query: state.searchQuery.trim(),
-                      loadedCount: state.breeds.length,
-                      hasMore: state.hasMore,
-                      onClear: () {
-                        _searchController.clear();
-                        context
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _searchController,
+                  builder: (context, value, _) {
+                    return Semantics(
+                      label: 'Buscar raza de gato',
+                      hint: 'Filtra por nombre entre las razas cargadas',
+                      textField: true,
+                      child: TextField(
+                        controller: _searchController,
+                        textInputAction: TextInputAction.search,
+                        onChanged: (query) => context
                             .read<BreedsBloc>()
-                            .add(const BreedsSearchQueryChanged(''));
-                      },
-                      onLoadMore: () => context
-                          .read<BreedsBloc>()
-                          .add(const BreedsNextPageRequested()),
-                    );
-                  }
-
-                  return RefreshIndicator(
-                    onRefresh: _onRefresh,
-                    child: Semantics(
-                      label:
-                          'Lista de razas de gatos, ${visibleBreeds.length} visibles',
-                      container: true,
-                      child: CustomScrollView(
-                        controller: _scrollController,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        slivers: [
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                            sliver: SliverList.separated(
-                              itemCount: visibleBreeds.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (context, index) {
-                                final breed = visibleBreeds[index];
-                                return BreedCard(
-                                  breed: breed,
-                                  onTap: () => context.push(
-                                    AppRoutes.breedDetailPath(breed.breed),
-                                    extra: breed,
-                                  ),
-                                );
-                              },
-                            ),
+                            .add(BreedsSearchQueryChanged(query)),
+                        decoration: InputDecoration(
+                          hintText: 'Buscar raza (ej. Abyssinian)...',
+                          prefixIcon: const ExcludeSemantics(
+                            child: Icon(Icons.search_rounded),
                           ),
-                          SliverToBoxAdapter(
-                            child: PaginationFooter(
-                              isLoadingMore: state.isLoadingMore,
-                              hasMore: state.hasMore,
-                              isSearching: state.isSearching,
-                              loadedCount: state.breeds.length,
-                              totalCount: state.total,
-                              errorMessage: state.paginationErrorMessage,
-                              onRetry: () => context
-                                  .read<BreedsBloc>()
-                                  .add(const BreedsNextPageRequested()),
-                              onLoadMore: () => context
-                                  .read<BreedsBloc>()
-                                  .add(const BreedsNextPageRequested()),
-                            ),
-                          ),
-                        ],
+                          suffixIcon: value.text.isNotEmpty
+                              ? IconButton(
+                                  tooltip: 'Limpiar búsqueda',
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    context.read<BreedsBloc>().add(
+                                          const BreedsSearchQueryChanged(
+                                            '',
+                                            immediate: true,
+                                          ),
+                                        );
+                                  },
+                                  icon: const Icon(Icons.close_rounded),
+                                )
+                              : null,
+                        ),
                       ),
-                    ),
+                    );
+                  },
+                ),
+              ),
+              BlocBuilder<BreedsBloc, BreedsState>(
+                buildWhen: (prev, curr) =>
+                    prev.isOnline != curr.isOnline ||
+                    prev.isFromCache != curr.isFromCache ||
+                    prev.isRevalidating != curr.isRevalidating ||
+                    prev.lastSyncedAt != curr.lastSyncedAt,
+                builder: (context, state) {
+                  return ConnectivityStatusBanner(
+                    isOnline: state.isOnline,
+                    isFromCache: state.isFromCache,
+                    isRevalidating: state.isRevalidating,
+                    lastSyncedAt: state.lastSyncedAt,
+                    onRetry: () =>
+                        context.read<BreedsBloc>().add(const BreedsRefreshed()),
                   );
                 },
               ),
-            ),
-          ],
+              Expanded(
+                child: BlocBuilder<BreedsBloc, BreedsState>(
+                  builder: (context, state) {
+                    if (state.status == BreedsStatus.initial ||
+                        (state.status == BreedsStatus.loading &&
+                            state.breeds.isEmpty)) {
+                      return const BreedsSkeletonList();
+                    }
+
+                    if (state.status == BreedsStatus.failure &&
+                        state.breeds.isEmpty) {
+                      return _InitialErrorView(
+                        message: state.errorMessage ??
+                            'No pudimos cargar el directorio de razas.',
+                        isOnline: state.isOnline,
+                        onRetry: () => context
+                            .read<BreedsBloc>()
+                            .add(const BreedsStarted()),
+                      );
+                    }
+
+                    final visibleBreeds = state.filteredBreeds;
+
+                    if (visibleBreeds.isEmpty && state.isSearching) {
+                      return _EmptySearchView(
+                        query: state.searchQuery.trim(),
+                        loadedCount: state.breeds.length,
+                        hasMore: state.hasMore,
+                        isLoadingMore: state.isLoadingMore,
+                        paginationErrorMessage: state.paginationErrorMessage,
+                        onClear: () {
+                          _searchController.clear();
+                          context.read<BreedsBloc>().add(
+                                const BreedsSearchQueryChanged(
+                                  '',
+                                  immediate: true,
+                                ),
+                              );
+                        },
+                        onLoadMore: () => context
+                            .read<BreedsBloc>()
+                            .add(const BreedsNextPageRequested()),
+                      );
+                    }
+
+                    if (visibleBreeds.isEmpty) {
+                      return _EmptyDirectoryView(
+                        isReloading: state.isRevalidating,
+                        onReload: () => context
+                            .read<BreedsBloc>()
+                            .add(const BreedsRefreshed()),
+                      );
+                    }
+
+                    return RefreshIndicator(
+                      onRefresh: _onRefresh,
+                      child: Semantics(
+                        label:
+                            'Lista de razas de gatos, ${visibleBreeds.length} visibles',
+                        container: true,
+                        child: CustomScrollView(
+                          controller: _scrollController,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          slivers: [
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                              sliver: SliverList.separated(
+                                itemCount: visibleBreeds.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 10),
+                                itemBuilder: (context, index) {
+                                  final breed = visibleBreeds[index];
+                                  return BreedCard(
+                                    breed: breed,
+                                    onTap: () => context.push(
+                                      AppRoutes.breedDetailPath(breed.breed),
+                                      extra: breed,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            SliverToBoxAdapter(
+                              child: PaginationFooter(
+                                isLoadingMore: state.isLoadingMore,
+                                hasMore: state.hasMore,
+                                isSearching: state.isSearching,
+                                loadedCount: state.breeds.length,
+                                totalCount: state.total,
+                                errorMessage: state.paginationErrorMessage,
+                                onRetry: () => context
+                                    .read<BreedsBloc>()
+                                    .add(const BreedsNextPageRequested()),
+                                onLoadMore: () => context
+                                    .read<BreedsBloc>()
+                                    .add(const BreedsNextPageRequested()),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _ScrollableCenteredView extends StatelessWidget {
+  const _ScrollableCenteredView({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -343,26 +398,24 @@ class _InitialErrorView extends StatelessWidget {
     return Semantics(
       liveRegion: true,
       container: true,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ExcludeSemantics(
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: colorScheme.errorContainer.withValues(alpha: 0.5),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isOnline ? Icons.cloud_off_rounded : Icons.wifi_off_rounded,
-                    size: 44,
-                    color: colorScheme.error,
-                  ),
+      child: _ScrollableCenteredView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: colorScheme.errorContainer.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isOnline ? Icons.cloud_off_rounded : Icons.wifi_off_rounded,
+                  size: 44,
+                  color: colorScheme.error,
                 ),
               ),
+            ),
             const SizedBox(height: 20),
             Text(
               isOnline
@@ -390,25 +443,18 @@ class _InitialErrorView extends StatelessWidget {
           ],
         ),
       ),
-    ),
     );
   }
 }
 
-class _EmptySearchView extends StatelessWidget {
-  const _EmptySearchView({
-    required this.query,
-    required this.loadedCount,
-    required this.hasMore,
-    required this.onClear,
-    required this.onLoadMore,
+class _EmptyDirectoryView extends StatelessWidget {
+  const _EmptyDirectoryView({
+    required this.isReloading,
+    required this.onReload,
   });
 
-  final String query;
-  final int loadedCount;
-  final bool hasMore;
-  final VoidCallback onClear;
-  final VoidCallback onLoadMore;
+  final bool isReloading;
+  final VoidCallback onReload;
 
   @override
   Widget build(BuildContext context) {
@@ -418,56 +464,187 @@ class _EmptySearchView extends StatelessWidget {
     return Semantics(
       liveRegion: true,
       container: true,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ExcludeSemantics(
+      child: _ScrollableCenteredView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.65,
+                  ),
+                  shape: BoxShape.circle,
+                ),
                 child: Icon(
-                  Icons.search_off_rounded,
-                  size: 52,
+                  Icons.pets_rounded,
+                  size: 44,
                   color: colorScheme.outline,
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                'Sin coincidencias para "$query"',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-                textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'No hay razas disponibles',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Buscamos entre las $loadedCount razas cargadas actualmente en memoria.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'El directorio no devolvió razas en este momento. Intenta recargar para consultar nuevamente.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 20),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                alignment: WrapAlignment.center,
-                children: [
-                  FilledButton.tonalIcon(
-                    onPressed: onClear,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    label: const Text('Limpiar filtro'),
-                  ),
-                  if (hasMore)
-                    OutlinedButton.icon(
-                      onPressed: onLoadMore,
-                      icon: const Icon(Icons.download_rounded, size: 18),
-                      label: const Text('Cargar más razas'),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: isReloading ? null : onReload,
+              icon: isReloading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded),
+              label: Text(isReloading ? 'Recargando...' : 'Recargar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptySearchView extends StatelessWidget {
+  const _EmptySearchView({
+    required this.query,
+    required this.loadedCount,
+    required this.hasMore,
+    required this.isLoadingMore,
+    required this.paginationErrorMessage,
+    required this.onClear,
+    required this.onLoadMore,
+  });
+
+  final String query;
+  final int loadedCount;
+  final bool hasMore;
+  final bool isLoadingMore;
+  final String? paginationErrorMessage;
+  final VoidCallback onClear;
+  final VoidCallback onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final hasPaginationError = paginationErrorMessage != null && !isLoadingMore;
+
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: _ScrollableCenteredView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.search_off_rounded,
+                size: 52,
+                color: colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Sin coincidencias para "$query"',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Buscamos entre las $loadedCount razas cargadas actualmente en memoria.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (hasPaginationError) ...[
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: colorScheme.errorContainer.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    ExcludeSemantics(
+                      child: Icon(
+                        Icons.cloud_off_rounded,
+                        size: 18,
+                        color: colorScheme.error,
+                      ),
                     ),
-                ],
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        paginationErrorMessage!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-          ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: onClear,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Limpiar filtro'),
+                ),
+                if (hasMore)
+                  OutlinedButton.icon(
+                    onPressed: isLoadingMore ? null : onLoadMore,
+                    icon: isLoadingMore
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            hasPaginationError
+                                ? Icons.refresh_rounded
+                                : Icons.download_rounded,
+                            size: 18,
+                          ),
+                    label: Text(
+                      isLoadingMore
+                          ? 'Cargando más razas...'
+                          : (hasPaginationError
+                              ? 'Reintentar cargar más'
+                              : 'Cargar más razas'),
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );

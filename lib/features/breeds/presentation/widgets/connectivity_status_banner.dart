@@ -58,10 +58,12 @@ class ConnectivityStatusBanner extends StatelessWidget {
                     color: colorScheme.primary,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Actualizando directorio en segundo plano...',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: colorScheme.primary,
+                  Expanded(
+                    child: Text(
+                      'Actualizando directorio en segundo plano...',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: colorScheme.primary,
+                      ),
                     ),
                   ),
                 ],
@@ -129,22 +131,11 @@ class _BannerContainer extends StatelessWidget {
           color: backgroundColor,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          children: [
-            ExcludeSemantics(
-              child: Icon(icon, size: 18, color: foregroundColor),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                text,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: foregroundColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-              ),
-            ),
-            TextButton(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 320 ||
+                MediaQuery.textScalerOf(context).scale(14) >= 18;
+            final actionButton = TextButton(
               onPressed: onAction,
               style: TextButton.styleFrom(
                 foregroundColor: foregroundColor,
@@ -155,8 +146,62 @@ class _BannerContainer extends StatelessWidget {
                 actionLabel,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-            ),
-          ],
+            );
+
+            if (isCompact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: ExcludeSemantics(
+                          child: Icon(icon, size: 18, color: foregroundColor),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          text,
+                          style:
+                              Theme.of(context).textTheme.labelMedium?.copyWith(
+                                    color: foregroundColor,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: actionButton,
+                  ),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                ExcludeSemantics(
+                  child: Icon(icon, size: 18, color: foregroundColor),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: foregroundColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ),
+                actionButton,
+              ],
+            );
+          },
         ),
       ),
     );

@@ -17,11 +17,12 @@ final class BreedsNextPageRequested extends BreedsEvent {
   const BreedsNextPageRequested();
 }
 
-/// Local in-memory search query update (debounced).
+/// Local in-memory search query update (debounced unless [immediate] is true).
 final class BreedsSearchQueryChanged extends BreedsEvent {
-  const BreedsSearchQueryChanged(this.query);
+  const BreedsSearchQueryChanged(this.query, {this.immediate = false});
 
   final String query;
+  final bool immediate;
 }
 
 /// Emitted when device network connectivity transitions online/offline.
