@@ -51,23 +51,30 @@ class CatFactCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'Dato Curioso Aleatorio',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      'Dato Curioso Aleatorio',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-                IconButton.filledTonal(
-                  onPressed: isLoading ? null : onRefresh,
-                  tooltip: 'Cargar otro dato curioso',
-                  icon: isLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh_rounded, size: 18),
+                Semantics(
+                  button: true,
+                  label: 'Cargar otro dato curioso aleatorio',
+                  child: IconButton.filledTonal(
+                    onPressed: isLoading ? null : onRefresh,
+                    tooltip: 'Cargar otro dato curioso',
+                    icon: isLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded, size: 18),
+                  ),
                 ),
               ],
             ),
@@ -77,56 +84,66 @@ class CatFactCard extends StatelessWidget {
               child: switch (status) {
                 CatFactStatus.initial || CatFactStatus.loading =>
                   const FactSkeleton(key: ValueKey('fact-loading')),
-                CatFactStatus.loaded => Column(
+                CatFactStatus.loaded => Semantics(
                     key: ValueKey('fact-${fact?.fact}'),
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '“${fact?.fact ?? ''}”',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          height: 1.45,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Fuente: catfact.ninja/fact',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                CatFactStatus.failure => Column(
-                    key: const ValueKey('fact-error'),
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.wifi_off_rounded,
-                            size: 18,
-                            color: colorScheme.error,
+                    liveRegion: true,
+                    container: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '“${fact?.fact ?? ''}”',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            height: 1.45,
+                            fontStyle: FontStyle.italic,
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              errorMessage ??
-                                  'No pudimos obtener un dato curioso en este momento.',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Fuente: catfact.ninja/fact',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                CatFactStatus.failure => Semantics(
+                    key: const ValueKey('fact-error'),
+                    liveRegion: true,
+                    container: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            ExcludeSemantics(
+                              child: Icon(
+                                Icons.wifi_off_rounded,
+                                size: 18,
+                                color: colorScheme.error,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.tonalIcon(
-                        onPressed: onRefresh,
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('Reintentar dato curioso'),
-                      ),
-                    ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                errorMessage ??
+                                    'No pudimos obtener un dato curioso en este momento.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: onRefresh,
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text('Reintentar dato curioso'),
+                        ),
+                      ],
+                    ),
                   ),
               },
             ),

@@ -46,21 +46,23 @@ class BreedAvatar extends StatelessWidget {
         ? theme.colorScheme.onSurface
         : theme.colorScheme.onSurface.withValues(alpha: 0.85);
 
-    final badge = Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(size * 0.28),
-      ),
-      child: Text(
-        breed.initials,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: fgColor,
-          fontWeight: FontWeight.w700,
-          fontSize: size * 0.36,
-          letterSpacing: 0.4,
+    final badge = ExcludeSemantics(
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(size * 0.28),
+        ),
+        child: Text(
+          breed.initials,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: fgColor,
+            fontWeight: FontWeight.w700,
+            fontSize: size * 0.36,
+            letterSpacing: 0.4,
+          ),
         ),
       ),
     );

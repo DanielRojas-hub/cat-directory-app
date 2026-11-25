@@ -144,19 +144,24 @@ class _BreedsListPageState extends State<BreedsListPage> {
                     : '${state.breeds.length}';
                 return Padding(
                   padding: const EdgeInsets.only(right: 16),
-                  child: Chip(
-                    visualDensity: VisualDensity.compact,
-                    side: BorderSide.none,
-                    backgroundColor: state.isOnline
-                        ? colorScheme.primaryContainer
-                        : colorScheme.errorContainer,
-                    label: Text(
-                      countLabel,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: state.isOnline
-                            ? colorScheme.onPrimaryContainer
-                            : colorScheme.onErrorContainer,
+                  child: Semantics(
+                    label:
+                        '${state.breeds.length} de ${state.total} razas cargadas, ${state.isOnline ? 'en línea' : 'sin conexión'}',
+                    excludeSemantics: true,
+                    child: Chip(
+                      visualDensity: VisualDensity.compact,
+                      side: BorderSide.none,
+                      backgroundColor: state.isOnline
+                          ? colorScheme.primaryContainer
+                          : colorScheme.errorContainer,
+                      label: Text(
+                        countLabel,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: state.isOnline
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onErrorContainer,
+                        ),
                       ),
                     ),
                   ),
@@ -172,27 +177,34 @@ class _BreedsListPageState extends State<BreedsListPage> {
               child: ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _searchController,
                 builder: (context, value, _) {
-                  return TextField(
-                    controller: _searchController,
-                    textInputAction: TextInputAction.search,
-                    onChanged: (query) => context
-                        .read<BreedsBloc>()
-                        .add(BreedsSearchQueryChanged(query)),
-                    decoration: InputDecoration(
-                      hintText: 'Buscar raza (ej. Abyssinian)...',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      suffixIcon: value.text.isNotEmpty
-                          ? IconButton(
-                              tooltip: 'Limpiar búsqueda',
-                              onPressed: () {
-                                _searchController.clear();
-                                context
-                                    .read<BreedsBloc>()
-                                    .add(const BreedsSearchQueryChanged(''));
-                              },
-                              icon: const Icon(Icons.close_rounded),
-                            )
-                          : null,
+                  return Semantics(
+                    label: 'Buscar raza de gato',
+                    hint: 'Filtra por nombre entre las razas cargadas',
+                    textField: true,
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (query) => context
+                          .read<BreedsBloc>()
+                          .add(BreedsSearchQueryChanged(query)),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar raza (ej. Abyssinian)...',
+                        prefixIcon: const ExcludeSemantics(
+                          child: Icon(Icons.search_rounded),
+                        ),
+                        suffixIcon: value.text.isNotEmpty
+                            ? IconButton(
+                                tooltip: 'Limpiar búsqueda',
+                                onPressed: () {
+                                  _searchController.clear();
+                                  context
+                                      .read<BreedsBloc>()
+                                      .add(const BreedsSearchQueryChanged(''));
+                                },
+                                icon: const Icon(Icons.close_rounded),
+                              )
+                            : null,
+                      ),
                     ),
                   );
                 },
@@ -256,45 +268,50 @@ class _BreedsListPageState extends State<BreedsListPage> {
 
                   return RefreshIndicator(
                     onRefresh: _onRefresh,
-                    child: CustomScrollView(
-                      controller: _scrollController,
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      slivers: [
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                          sliver: SliverList.separated(
-                            itemCount: visibleBreeds.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final breed = visibleBreeds[index];
-                              return BreedCard(
-                                breed: breed,
-                                onTap: () => context.push(
-                                  AppRoutes.breedDetailPath(breed.breed),
-                                  extra: breed,
-                                ),
-                              );
-                            },
+                    child: Semantics(
+                      label:
+                          'Lista de razas de gatos, ${visibleBreeds.length} visibles',
+                      container: true,
+                      child: CustomScrollView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        slivers: [
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                            sliver: SliverList.separated(
+                              itemCount: visibleBreeds.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final breed = visibleBreeds[index];
+                                return BreedCard(
+                                  breed: breed,
+                                  onTap: () => context.push(
+                                    AppRoutes.breedDetailPath(breed.breed),
+                                    extra: breed,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                        SliverToBoxAdapter(
-                          child: PaginationFooter(
-                            isLoadingMore: state.isLoadingMore,
-                            hasMore: state.hasMore,
-                            isSearching: state.isSearching,
-                            loadedCount: state.breeds.length,
-                            totalCount: state.total,
-                            errorMessage: state.paginationErrorMessage,
-                            onRetry: () => context
-                                .read<BreedsBloc>()
-                                .add(const BreedsNextPageRequested()),
-                            onLoadMore: () => context
-                                .read<BreedsBloc>()
-                                .add(const BreedsNextPageRequested()),
+                          SliverToBoxAdapter(
+                            child: PaginationFooter(
+                              isLoadingMore: state.isLoadingMore,
+                              hasMore: state.hasMore,
+                              isSearching: state.isSearching,
+                              loadedCount: state.breeds.length,
+                              totalCount: state.total,
+                              errorMessage: state.paginationErrorMessage,
+                              onRetry: () => context
+                                  .read<BreedsBloc>()
+                                  .add(const BreedsNextPageRequested()),
+                              onLoadMore: () => context
+                                  .read<BreedsBloc>()
+                                  .add(const BreedsNextPageRequested()),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -323,24 +340,29 @@ class _InitialErrorView extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: colorScheme.errorContainer.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ExcludeSemantics(
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: colorScheme.errorContainer.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isOnline ? Icons.cloud_off_rounded : Icons.wifi_off_rounded,
+                    size: 44,
+                    color: colorScheme.error,
+                  ),
+                ),
               ),
-              child: Icon(
-                isOnline ? Icons.cloud_off_rounded : Icons.wifi_off_rounded,
-                size: 44,
-                color: colorScheme.error,
-              ),
-            ),
             const SizedBox(height: 20),
             Text(
               isOnline
@@ -368,6 +390,7 @@ class _InitialErrorView extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -392,53 +415,59 @@ class _EmptySearchView extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 52,
-              color: colorScheme.outline,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Sin coincidencias para "$query"',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Buscamos entre las $loadedCount razas cargadas actualmente en memoria.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              alignment: WrapAlignment.center,
-              children: [
-                FilledButton.tonalIcon(
-                  onPressed: onClear,
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  label: const Text('Limpiar filtro'),
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ExcludeSemantics(
+                child: Icon(
+                  Icons.search_off_rounded,
+                  size: 52,
+                  color: colorScheme.outline,
                 ),
-                if (hasMore)
-                  OutlinedButton.icon(
-                    onPressed: onLoadMore,
-                    icon: const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('Cargar más razas'),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Sin coincidencias para "$query"',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Buscamos entre las $loadedCount razas cargadas actualmente en memoria.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: onClear,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Limpiar filtro'),
                   ),
-              ],
-            ),
-          ],
+                  if (hasMore)
+                    OutlinedButton.icon(
+                      onPressed: onLoadMore,
+                      icon: const Icon(Icons.download_rounded, size: 18),
+                      label: const Text('Cargar más razas'),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
